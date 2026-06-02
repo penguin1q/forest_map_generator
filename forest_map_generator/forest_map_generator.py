@@ -5,7 +5,10 @@ import math
 import rclpy
 import random
 import numpy as np
-from stl import mesh
+try:
+    from stl import mesh
+except ImportError:
+    mesh = None
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 
@@ -26,12 +29,32 @@ class TerrainHelper:
         self.heightmap_data = None
 
     def load_heightmap(self):
-        heightmap_path = os.path.join(
-            self.package_path, "models", "terrain", "heightmaps", self.heightmap_file
+        candidate_paths = [
+            os.path.join(
+                self.package_path,
+                "models",
+                "terrain",
+                "heightmaps",
+                self.heightmap_file,
+            ),
+            os.path.join(
+                self.package_path,
+                "models",
+                "terrain",
+                "materials",
+                "textures",
+                self.heightmap_file,
+            ),
+        ]
+        heightmap_path = next(
+            (path for path in candidate_paths if os.path.exists(path)), None
         )
 
-        if not os.path.exists(heightmap_path):
-            self.get_logger().error(f"Heightmap file {heightmap_path} does not exist.")
+        if heightmap_path is None:
+            self.get_logger().error(
+                "Heightmap file does not exist. Checked: "
+                + ", ".join(candidate_paths)
+            )
             return None
 
         try:
@@ -329,6 +352,13 @@ class RoadGenerator(TerrainHelper):
         if len(path_world) < 2:
             return ""
 
+        if mesh is None:
+            self.get_logger().warn(
+                "python module stl is not available; skipping road mesh generation. "
+                "Install python3-stl or numpy-stl to enable generated roads."
+            )
+            return ""
+
         vertices = []
         road_width = self.road_width
         for i in range(len(path_world)):
@@ -504,7 +534,6 @@ class ForestMapGenerator(Node):
 def main():
     rclpy.init()
     node = ForestMapGenerator()
-    rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
 
