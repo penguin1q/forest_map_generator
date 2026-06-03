@@ -1,0 +1,76 @@
+{
+  "type": "FeatureCollection",
+  "name": "sample_tree_rows",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:EPSG::3857"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "mode": "trees_on_line",
+        "tree_type": "tree1",
+        "name_prefix": "row01",
+        "spacing": 4.0,
+        "yaw": 0.0,
+        "scale": 1.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -24.0,
+            55.0
+          ],
+          [
+            16.0,
+            55.0
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mode": "trees_on_line",
+        "tree_type": "tree1",
+        "name_prefix": "row02",
+        "spacing": 4.0,
+        "yaw": 0.0,
+        "scale": 1.0
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -24.0,
+            60.0
+          ],
+          [
+            16.0,
+            60.0
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "manual_point_001",
+        "tree_type": "tree1",
+        "yaw": 0.0,
+        "scale": 1.0
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -4.0,
+          70.0
+        ]
+      }
+    }
+  ]
+}

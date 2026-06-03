@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import csv
+import json
 import os
 import cv2
 import math
@@ -153,6 +154,7 @@ class TreeGenerator(TerrainHelper):
         self.tree_types = node.tree_types
         self.min_tree_distance = node.min_tree_distance
         self.placement_file = node.placement_file
+        self.geojson_coordinate_mode = node.geojson_coordinate_mode
         self.orchard_origin_x = node.orchard_origin_x
         self.orchard_origin_y = node.orchard_origin_y
         self.orchard_rows = node.orchard_rows
@@ -521,6 +523,361 @@ class TreeGenerator(TerrainHelper):
         )
         return accepted
 
+    def _geojson_property(self, properties, key):
+        value = properties.get(key, "")
+        return "" if value is None else str(value).strip()
+
+    def _parse_geojson_optional_float(self, value, default, context, field_name):
+        if value == "":
+            return default, True
+
+        try:
+            return float(value), True
+        except (TypeError, ValueError):
+            self.get_logger().warn(
+                "GeoJSON %s: invalid %s '%s'; using %.3f"
+                % (context, field_name, value, default)
+            )
+            return default, True
+
+    def _parse_geojson_required_float(self, value, context, field_name):
+        if value == "":
+            self.get_logger().warn(
+                "GeoJSON %s: missing %s; skipping feature." % (context, field_name)
+            )
+            return None
+
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            self.get_logger().warn(
+                "GeoJSON %s: invalid %s '%s'; skipping feature."
+                % (context, field_name, value)
+            )
+            return None
+
+    def _geojson_default_tree_type(self, context):
+        if self.tree_types:
+            return self.tree_types[0]
+
+        self.get_logger().warn(
+            "GeoJSON %s: tree_type is empty and tree_types parameter is empty; skipping."
+            % context
+        )
+        return None
+
+    def _parse_geojson_xy(self, coordinates, context):
+        if not isinstance(coordinates, (list, tuple)) or len(coordinates) < 2:
+            self.get_logger().warn(
+                "GeoJSON %s: invalid coordinates; expected [x, y]." % context
+            )
+            return None
+
+        try:
+            return float(coordinates[0]), float(coordinates[1])
+        except (TypeError, ValueError):
+            self.get_logger().warn(
+                "GeoJSON %s: invalid coordinates; x and y must be numeric." % context
+            )
+            return None
+
+    def interpolate_points_along_polyline(
+        self, coords, spacing, start_offset=0.0, end_offset=0.0
+    ):
+        segments = []
+        total_length = 0.0
+        for start, end in zip(coords[:-1], coords[1:]):
+            length = math.hypot(end[0] - start[0], end[1] - start[1])
+            if length <= 1e-9:
+                continue
+            segments.append((start, end, length, total_length))
+            total_length += length
+
+        usable_start = start_offset
+        usable_end = total_length - end_offset
+        if total_length <= 1e-9 or usable_end <= usable_start:
+            return []
+
+        def point_at(distance):
+            if distance <= 0.0:
+                return segments[0][0]
+            if distance >= total_length:
+                return segments[-1][1]
+
+            for start, end, length, segment_start in segments:
+                segment_end = segment_start + length
+                if distance <= segment_end + 1e-9:
+                    t = (distance - segment_start) / length
+                    return (
+                        start[0] + (end[0] - start[0]) * t,
+                        start[1] + (end[1] - start[1]) * t,
+                    )
+            return segments[-1][1]
+
+        points = []
+        distance = usable_start
+        while distance <= usable_end + 1e-8:
+            point = point_at(min(distance, total_length))
+            if not points or math.hypot(point[0] - points[-1][0], point[1] - points[-1][1]) > 1e-8:
+                points.append(point)
+            distance += spacing
+        return points
+
+    def _create_geojson_tree(
+        self, world_x, world_y, z_value, tree_type, yaw, scale, name, context
+    ):
+        px, py = self.world_to_pixel(world_x, world_y)
+        if not self._is_valid_pixel(px, py, self.heightmap_data):
+            self.get_logger().warn(
+                "GeoJSON %s: invalid tree position; outside or too close to heightmap edge."
+                % context
+            )
+            return None
+
+        slope = self.calculate_scope(px, py)
+        if slope >= self.max_slope:
+            self.get_logger().warn(
+                "GeoJSON %s: invalid tree position; slope %.2f exceeds max_slope %.2f."
+                % (context, slope, self.max_slope)
+            )
+            return None
+
+        _, _, heightmap_z = self.pixel_to_world(px, py)
+        if z_value == "":
+            world_z = heightmap_z
+        else:
+            try:
+                world_z = float(z_value)
+            except (TypeError, ValueError):
+                self.get_logger().warn(
+                    "GeoJSON %s: invalid z '%s'; skipping tree." % (context, z_value)
+                )
+                return None
+
+        return TreeInstance(
+            px=px,
+            py=py,
+            tree_type=tree_type,
+            yaw=yaw,
+            scale=scale,
+            name=name,
+            world_x=world_x,
+            world_y=world_y,
+            world_z=world_z,
+        )
+
+    def generate_geojson_trees(self):
+        coordinate_mode = str(self.geojson_coordinate_mode).strip().lower()
+        self.get_logger().info(f"GeoJSON coordinate mode: {coordinate_mode}")
+        if coordinate_mode != "local_xy":
+            self.get_logger().error(
+                "Unsupported geojson_coordinate_mode '%s'. Use 'local_xy'."
+                % self.geojson_coordinate_mode
+            )
+            return []
+
+        # Phase 3 treats GeoJSON coordinates as local Gazebo world XY.
+        # No CRS transformation or lon/lat conversion is performed here.
+        geojson_path = self._resolve_placement_file()
+        if geojson_path is None:
+            return []
+
+        self.get_logger().info(f"Reading GeoJSON placement file: {geojson_path}")
+        if not os.path.exists(geojson_path):
+            self.get_logger().error(
+                f"GeoJSON placement file does not exist: {geojson_path}"
+            )
+            return []
+
+        heightmap_data = self.load_heightmap()
+        if heightmap_data is None:
+            self.get_logger().error(
+                "Heightmap data could not be loaded. Aborting GeoJSON placement."
+            )
+            return []
+
+        try:
+            with open(geojson_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            self.get_logger().error(f"Invalid GeoJSON file: {e}")
+            return []
+        except OSError as e:
+            self.get_logger().error(f"Failed to read GeoJSON placement file: {e}")
+            return []
+
+        if data.get("type") != "FeatureCollection":
+            self.get_logger().error("GeoJSON root type must be FeatureCollection.")
+            return []
+
+        crs = data.get("crs")
+        if isinstance(crs, dict):
+            crs_name = crs.get("properties", {}).get("name")
+            if crs_name:
+                self.get_logger().info(f"GeoJSON CRS field found: {crs_name}")
+
+        accepted = []
+        skipped_positions = 0
+        skipped_features = 0
+        features = data.get("features", [])
+        if not isinstance(features, list):
+            self.get_logger().error("GeoJSON features must be a list.")
+            return []
+
+        for feature_index, feature in enumerate(features):
+            context = "feature %d" % feature_index
+            if not isinstance(feature, dict) or feature.get("type") != "Feature":
+                skipped_features += 1
+                self.get_logger().warn("GeoJSON %s: malformed feature; skipping." % context)
+                continue
+
+            properties = feature.get("properties") or {}
+            geometry = feature.get("geometry") or {}
+            if not isinstance(properties, dict) or not isinstance(geometry, dict):
+                skipped_features += 1
+                self.get_logger().warn("GeoJSON %s: malformed feature; skipping." % context)
+                continue
+
+            geometry_type = geometry.get("type")
+            coordinates = geometry.get("coordinates")
+
+            tree_type = self._geojson_property(properties, "tree_type")
+            if tree_type == "":
+                tree_type = self._geojson_default_tree_type(context)
+                if tree_type is None:
+                    skipped_features += 1
+                    continue
+            yaw, _ = self._parse_geojson_optional_float(
+                self._geojson_property(properties, "yaw"), 0.0, context, "yaw"
+            )
+            scale, _ = self._parse_geojson_optional_float(
+                self._geojson_property(properties, "scale"), 1.0, context, "scale"
+            )
+            z_value = self._geojson_property(properties, "z")
+
+            if geometry_type == "Point":
+                xy = self._parse_geojson_xy(coordinates, context)
+                if xy is None:
+                    skipped_positions += 1
+                    continue
+
+                name = self._geojson_property(properties, "name")
+                if name == "":
+                    name = f"{tree_type}_{len(accepted):04d}"
+
+                tree = self._create_geojson_tree(
+                    xy[0], xy[1], z_value, tree_type, yaw, scale, name, context
+                )
+                if tree is None:
+                    skipped_positions += 1
+                    continue
+                accepted.append(tree)
+            elif geometry_type == "LineString":
+                mode = self._geojson_property(properties, "mode")
+                if mode != "trees_on_line":
+                    skipped_features += 1
+                    self.get_logger().warn(
+                        "GeoJSON %s: LineString mode must be trees_on_line; skipping feature."
+                        % context
+                    )
+                    continue
+
+                spacing = self._parse_geojson_required_float(
+                    self._geojson_property(properties, "spacing"), context, "spacing"
+                )
+                if spacing is None or spacing <= 0.0:
+                    skipped_features += 1
+                    self.get_logger().warn(
+                        "GeoJSON %s: missing spacing or spacing <= 0; skipping feature."
+                        % context
+                    )
+                    continue
+
+                if not isinstance(coordinates, list) or len(coordinates) < 2:
+                    skipped_features += 1
+                    self.get_logger().warn(
+                        "GeoJSON %s: invalid coordinates for LineString; skipping feature."
+                        % context
+                    )
+                    continue
+
+                line_coords = []
+                malformed = False
+                for coord_index, coord in enumerate(coordinates):
+                    xy = self._parse_geojson_xy(coord, "%s coordinate %d" % (context, coord_index))
+                    if xy is None:
+                        malformed = True
+                        break
+                    line_coords.append(xy)
+                if malformed:
+                    skipped_features += 1
+                    continue
+
+                start_offset, _ = self._parse_geojson_optional_float(
+                    self._geojson_property(properties, "start_offset"),
+                    0.0,
+                    context,
+                    "start_offset",
+                )
+                end_offset, _ = self._parse_geojson_optional_float(
+                    self._geojson_property(properties, "end_offset"),
+                    0.0,
+                    context,
+                    "end_offset",
+                )
+                if start_offset < 0.0 or end_offset < 0.0:
+                    skipped_features += 1
+                    self.get_logger().warn(
+                        "GeoJSON %s: start_offset/end_offset must be >= 0; skipping feature."
+                        % context
+                    )
+                    continue
+
+                candidate_points = self.interpolate_points_along_polyline(
+                    line_coords, spacing, start_offset, end_offset
+                )
+                name_prefix = self._geojson_property(properties, "name_prefix") or "line"
+                self.get_logger().info(
+                    "LineString feature %s generated %d candidate points"
+                    % (name_prefix, len(candidate_points))
+                )
+                if not candidate_points:
+                    skipped_features += 1
+                    self.get_logger().warn(
+                        "GeoJSON %s: usable length is less than or equal to zero; skipping feature."
+                        % context
+                    )
+                    continue
+
+                for point_index, (world_x, world_y) in enumerate(candidate_points):
+                    name = f"{name_prefix}_{point_index:04d}"
+                    tree = self._create_geojson_tree(
+                        world_x,
+                        world_y,
+                        z_value,
+                        tree_type,
+                        yaw,
+                        scale,
+                        name,
+                        "%s %s" % (context, name),
+                    )
+                    if tree is None:
+                        skipped_positions += 1
+                        continue
+                    accepted.append(tree)
+            else:
+                skipped_features += 1
+                self.get_logger().warn(
+                    "GeoJSON %s: unsupported geometry type '%s'; skipping feature."
+                    % (context, geometry_type)
+                )
+
+        self.get_logger().info(
+            "GeoJSON placement completed: accepted %d trees, skipped %d invalid positions, skipped %d unsupported features"
+            % (len(accepted), skipped_positions, skipped_features)
+        )
+        return accepted
+
     def generate_trees_xml(self, trees):
         trees_xml = "\n    <!-- Auto-generated trees -->\n"
         for i, tree in enumerate(trees):
@@ -793,6 +1150,7 @@ class ForestMapGenerator(Node):
 
         self.declare_parameter("placement_mode", "random")
         self.declare_parameter("placement_file", "")
+        self.declare_parameter("geojson_coordinate_mode", "local_xy")
         self.declare_parameter("enable_road_generation", True)
         self.declare_parameter("orchard_origin_x", -40.0)
         self.declare_parameter("orchard_origin_y", -30.0)
@@ -821,6 +1179,7 @@ class ForestMapGenerator(Node):
 
         self.placement_mode = self.get_parameter("placement_mode").value
         self.placement_file = self.get_parameter("placement_file").value
+        self.geojson_coordinate_mode = self.get_parameter("geojson_coordinate_mode").value
         self.enable_road_generation = self.get_parameter("enable_road_generation").value
         self.orchard_origin_x = self.get_parameter("orchard_origin_x").value
         self.orchard_origin_y = self.get_parameter("orchard_origin_y").value
@@ -897,10 +1256,12 @@ class ForestMapGenerator(Node):
             trees = self.tree_generator.generate_orchard_grid_trees()
         elif placement_mode == "csv_points":
             trees = self.tree_generator.generate_csv_trees()
+        elif placement_mode == "geojson":
+            trees = self.tree_generator.generate_geojson_trees()
         else:
             self.get_logger().error(
                 f"Unsupported placement_mode '{self.placement_mode}'. "
-                "Use 'random', 'orchard_grid', or 'csv_points'."
+                "Use 'random', 'orchard_grid', 'csv_points', or 'geojson'."
             )
             return
 
