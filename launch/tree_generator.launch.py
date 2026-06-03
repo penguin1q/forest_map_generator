@@ -37,7 +37,10 @@ def generate_launch_description():
                         "min_tree_distance": 5.0,
                         "max_slope": 30.0,
                         "output_world_file": "world_with_trees.world",
-                        "placement_mode": "orchard_grid",
+                        "placement_mode": "random",  # "orchard_grid" or "csv_points"
+                        # To test CSV placement, set placement_mode to "csv_points"
+                        # and placement_file to "config/sample_tree_points.csv".
+                        "placement_file": "",
                         "enable_road_generation": False,
                         "orchard_origin_x": -40.0,
                         "orchard_origin_y": -30.0,

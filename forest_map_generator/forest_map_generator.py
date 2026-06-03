@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+import csv
 import os
 import cv2
 import math
 import rclpy
 import random
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 try:
@@ -23,6 +25,9 @@ class TreeInstance:
     yaw: float = None
     scale: float = 1.0
     name: str = None
+    world_x: Optional[float] = None
+    world_y: Optional[float] = None
+    world_z: Optional[float] = None
 
 
 # Terrain helper class
@@ -147,6 +152,7 @@ class TreeGenerator(TerrainHelper):
         self.num_trees = node.num_trees
         self.tree_types = node.tree_types
         self.min_tree_distance = node.min_tree_distance
+        self.placement_file = node.placement_file
         self.orchard_origin_x = node.orchard_origin_x
         self.orchard_origin_y = node.orchard_origin_y
         self.orchard_rows = node.orchard_rows
@@ -196,13 +202,14 @@ class TreeGenerator(TerrainHelper):
         yaw=None,
         scale=1.0,
         name=None,
+        force_scale=False,
     ):
         if yaw is None:
             yaw = random.uniform(0, 2 * math.pi)
 
         tree_name = name if name else f"{tree_type}_{tree_id}"
         scale_xml = ""
-        if scale is not None and abs(float(scale) - 1.0) > 1e-6:
+        if scale is not None and (force_scale or abs(float(scale) - 1.0) > 1e-6):
             # Gazebo/SDF support for <scale> inside <include> can vary.
             # Model-level mesh scaling is more reliable if this is ignored.
             scale_xml = f"            <scale>{scale} {scale} {scale}</scale>\n"
@@ -329,10 +336,201 @@ class TreeGenerator(TerrainHelper):
         )
         return accepted
 
+    def _resolve_placement_file(self):
+        placement_file = str(self.placement_file).strip()
+        if not placement_file:
+            self.get_logger().error(
+                "placement_file is empty. Set it when placement_mode is csv_points."
+            )
+            return None
+
+        if os.path.isabs(placement_file):
+            return placement_file
+
+        candidates = [
+            os.path.join(self.package_path, placement_file),
+            os.path.abspath(placement_file),
+        ]
+
+        install_marker = os.path.join(
+            "install", "forest_map_generator", "share", "forest_map_generator"
+        )
+        if install_marker in self.package_path:
+            workspace_root = self.package_path.split(install_marker)[0].rstrip(os.sep)
+            candidates.append(
+                os.path.join(workspace_root, "src", "forest_map_generator", placement_file)
+            )
+
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+
+        return candidates[0]
+
+    def _csv_cell(self, row, key):
+        value = row.get(key, "")
+        return "" if value is None else str(value).strip()
+
+    def _parse_optional_float(self, value, default, row_number, field_name):
+        if value == "":
+            return default
+
+        try:
+            return float(value)
+        except ValueError:
+            self.get_logger().warn(
+                "CSV row %d: invalid %s '%s', using %.3f"
+                % (row_number, field_name, value, default)
+            )
+            return default
+
+    def _default_csv_tree_type(self, row_number):
+        if self.tree_types:
+            return self.tree_types[0]
+
+        self.get_logger().error(
+            "CSV row %d: tree_type is empty and tree_types parameter is empty."
+            % row_number
+        )
+        return None
+
+    def generate_csv_trees(self):
+        csv_path = self._resolve_placement_file()
+        if csv_path is None:
+            return []
+
+        self.get_logger().info(f"Reading tree placement CSV: {csv_path}")
+        if not os.path.exists(csv_path):
+            self.get_logger().error(f"CSV placement file does not exist: {csv_path}")
+            return []
+
+        heightmap_data = self.load_heightmap()
+        if heightmap_data is None:
+            self.get_logger().error(
+                "Heightmap data could not be loaded. Aborting CSV placement."
+            )
+            return []
+
+        accepted = []
+        skipped = 0
+
+        try:
+            with open(csv_path, newline="") as f:
+                reader = csv.DictReader(f)
+                fieldnames = set(reader.fieldnames or [])
+                missing_headers = {"x", "y"} - fieldnames
+                if missing_headers:
+                    self.get_logger().error(
+                        "CSV placement file is missing required headers: %s"
+                        % ", ".join(sorted(missing_headers))
+                    )
+                    return []
+
+                for row_number, row in enumerate(reader, start=2):
+                    x_value = self._csv_cell(row, "x")
+                    y_value = self._csv_cell(row, "y")
+                    if x_value == "" or y_value == "":
+                        skipped += 1
+                        self.get_logger().warn(
+                            "CSV row %d: x and y are required; skipping row."
+                            % row_number
+                        )
+                        continue
+
+                    try:
+                        world_x = float(x_value)
+                        world_y = float(y_value)
+                    except ValueError:
+                        skipped += 1
+                        self.get_logger().warn(
+                            "CSV row %d: invalid x/y values '%s', '%s'; skipping row."
+                            % (row_number, x_value, y_value)
+                        )
+                        continue
+
+                    px, py = self.world_to_pixel(world_x, world_y)
+                    if not self._is_valid_pixel(px, py, heightmap_data):
+                        skipped += 1
+                        self.get_logger().warn(
+                            "CSV row %d: point is outside or too close to heightmap edge; skipping row."
+                            % row_number
+                        )
+                        continue
+
+                    slope = self.calculate_scope(px, py)
+                    if slope >= self.max_slope:
+                        skipped += 1
+                        self.get_logger().warn(
+                            "CSV row %d: slope %.2f exceeds max_slope %.2f; skipping row."
+                            % (row_number, slope, self.max_slope)
+                        )
+                        continue
+
+                    tree_type = self._csv_cell(row, "tree_type")
+                    if tree_type == "":
+                        tree_type = self._default_csv_tree_type(row_number)
+                        if tree_type is None:
+                            skipped += 1
+                            continue
+
+                    _, _, heightmap_z = self.pixel_to_world(px, py)
+                    z_value = self._csv_cell(row, "z")
+                    if z_value == "":
+                        world_z = heightmap_z
+                    else:
+                        try:
+                            world_z = float(z_value)
+                        except ValueError:
+                            skipped += 1
+                            self.get_logger().warn(
+                                "CSV row %d: invalid z value '%s'; skipping row."
+                                % (row_number, z_value)
+                            )
+                            continue
+
+                    yaw = self._parse_optional_float(
+                        self._csv_cell(row, "yaw"), 0.0, row_number, "yaw"
+                    )
+                    scale = self._parse_optional_float(
+                        self._csv_cell(row, "scale"), 1.0, row_number, "scale"
+                    )
+                    name = self._csv_cell(row, "name")
+                    if name == "":
+                        name = f"{tree_type}_{len(accepted):04d}"
+
+                    accepted.append(
+                        TreeInstance(
+                            px=px,
+                            py=py,
+                            tree_type=tree_type,
+                            yaw=yaw,
+                            scale=scale,
+                            name=name,
+                            world_x=world_x,
+                            world_y=world_y,
+                            world_z=world_z,
+                        )
+                    )
+        except OSError as e:
+            self.get_logger().error(f"Failed to read CSV placement file: {e}")
+            return []
+
+        self.get_logger().info(
+            "CSV placement completed: accepted %d trees, skipped %d invalid rows"
+            % (len(accepted), skipped)
+        )
+        return accepted
+
     def generate_trees_xml(self, trees):
         trees_xml = "\n    <!-- Auto-generated trees -->\n"
         for i, tree in enumerate(trees):
-            world_x, world_y, world_z = self.pixel_to_world(tree.px, tree.py)
+            pixel_world_x, pixel_world_y, pixel_world_z = self.pixel_to_world(tree.px, tree.py)
+            world_x = tree.world_x if tree.world_x is not None else pixel_world_x
+            world_y = tree.world_y if tree.world_y is not None else pixel_world_y
+            world_z = tree.world_z if tree.world_z is not None else pixel_world_z
+            force_scale = any(
+                value is not None for value in (tree.world_x, tree.world_y, tree.world_z)
+            )
             trees_xml += self.create_tree_include_xml(
                 tree.tree_type,
                 world_x,
@@ -342,6 +540,7 @@ class TreeGenerator(TerrainHelper):
                 yaw=tree.yaw,
                 scale=tree.scale,
                 name=tree.name,
+                force_scale=force_scale,
             )
         trees_xml += "    <!-- End auto-generated trees -->\n"
         return trees_xml
@@ -362,7 +561,9 @@ class RoadGenerator(TerrainHelper):
         self.tree_world_pos = []
 
         for tree in trees:
-            wx, wy, _ = self.pixel_to_world(tree.px, tree.py)
+            pixel_wx, pixel_wy, _ = self.pixel_to_world(tree.px, tree.py)
+            wx = tree.world_x if tree.world_x is not None else pixel_wx
+            wy = tree.world_y if tree.world_y is not None else pixel_wy
             self.tree_world_pos.append((wx, wy))
 
         self.get_logger().info(
@@ -591,6 +792,7 @@ class ForestMapGenerator(Node):
         self.declare_parameter("road_min_tree_dist", 3.0)
 
         self.declare_parameter("placement_mode", "random")
+        self.declare_parameter("placement_file", "")
         self.declare_parameter("enable_road_generation", True)
         self.declare_parameter("orchard_origin_x", -40.0)
         self.declare_parameter("orchard_origin_y", -30.0)
@@ -618,6 +820,7 @@ class ForestMapGenerator(Node):
         self.road_min_tree_dist = self.get_parameter("road_min_tree_dist").value
 
         self.placement_mode = self.get_parameter("placement_mode").value
+        self.placement_file = self.get_parameter("placement_file").value
         self.enable_road_generation = self.get_parameter("enable_road_generation").value
         self.orchard_origin_x = self.get_parameter("orchard_origin_x").value
         self.orchard_origin_y = self.get_parameter("orchard_origin_y").value
@@ -692,10 +895,12 @@ class ForestMapGenerator(Node):
                 )
             )
             trees = self.tree_generator.generate_orchard_grid_trees()
+        elif placement_mode == "csv_points":
+            trees = self.tree_generator.generate_csv_trees()
         else:
             self.get_logger().error(
                 f"Unsupported placement_mode '{self.placement_mode}'. "
-                "Use 'random' or 'orchard_grid'."
+                "Use 'random', 'orchard_grid', or 'csv_points'."
             )
             return
 

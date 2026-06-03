@@ -33,6 +33,7 @@ setup(
         ),
         ("share/" + package_name + "/models/road/meshes", glob("models/road/meshes/*")),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
+        ("share/" + package_name + "/config", glob("config/*.csv")),
         ("share/" + package_name + "/scripts", glob("scripts/*.py")),
         (
             "share/" + package_name + "/scripts/update_heightmap",
