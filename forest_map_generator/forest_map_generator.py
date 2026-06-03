@@ -4,6 +4,8 @@ import cv2
 import math
 import rclpy
 import random
+from dataclasses import dataclass
+
 import numpy as np
 try:
     from stl import mesh
@@ -11,6 +13,16 @@ except ImportError:
     mesh = None
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
+
+
+@dataclass
+class TreeInstance:
+    px: int
+    py: int
+    tree_type: str
+    yaw: float = None
+    scale: float = 1.0
+    name: str = None
 
 
 # Terrain helper class
@@ -135,43 +147,82 @@ class TreeGenerator(TerrainHelper):
         self.num_trees = node.num_trees
         self.tree_types = node.tree_types
         self.min_tree_distance = node.min_tree_distance
+        self.orchard_origin_x = node.orchard_origin_x
+        self.orchard_origin_y = node.orchard_origin_y
+        self.orchard_rows = node.orchard_rows
+        self.orchard_cols = node.orchard_cols
+        self.orchard_tree_spacing = node.orchard_tree_spacing
+        self.orchard_row_spacing = node.orchard_row_spacing
+        self.orchard_yaw_deg = node.orchard_yaw_deg
+        self.orchard_jitter_xy = node.orchard_jitter_xy
+        self.scale_min = node.scale_min
+        self.scale_max = node.scale_max
+
+    def _has_tree_types(self):
+        if self.tree_types:
+            return True
+
+        self.get_logger().error("tree_types is empty. Aborting tree generation.")
+        return False
+
+    def _is_valid_pixel(self, px, py, heightmap_data, margin=10):
+        return (
+            margin <= px < heightmap_data.shape[1] - margin
+            and margin <= py < heightmap_data.shape[0] - margin
+        )
 
     def is_valid_tree_position(self, px, py, trees):
-        if (
-            px < 10
-            or px >= self.heightmap_data.shape[1] - 10
-            or py < 10
-            or py >= self.heightmap_data.shape[0] - 10
-        ):
+        if not self._is_valid_pixel(px, py, self.heightmap_data):
             return False
 
         slope = self.calculate_scope(px, py)
         if slope >= self.max_slope:
             return False
 
-        for tree_x, tree_y, _ in trees:
-            dist = math.sqrt((px - tree_x) ** 2 + (py - tree_y) ** 2)
+        for tree in trees:
+            dist = math.sqrt((px - tree.px) ** 2 + (py - tree.py) ** 2)
             if dist < self.min_tree_distance:
                 return False
 
         return True
 
-    def create_tree_include_xml(self, tree_type, world_x, world_y, world_z, tree_id):
-        yaw = random.uniform(0, 2 * math.pi)
+    def create_tree_include_xml(
+        self,
+        tree_type,
+        world_x,
+        world_y,
+        world_z,
+        tree_id,
+        yaw=None,
+        scale=1.0,
+        name=None,
+    ):
+        if yaw is None:
+            yaw = random.uniform(0, 2 * math.pi)
 
-        tree_xml = f"""
+        tree_name = name if name else f"{tree_type}_{tree_id}"
+        scale_xml = ""
+        if scale is not None and abs(float(scale) - 1.0) > 1e-6:
+            # Gazebo/SDF support for <scale> inside <include> can vary.
+            # Model-level mesh scaling is more reliable if this is ignored.
+            scale_xml = f"            <scale>{scale} {scale} {scale}</scale>\n"
+
+        tree_xml = f'''
         <include>
-            <name>{tree_type}_{tree_id}</name>
+            <name>{tree_name}</name>
             <uri>model://{tree_type}</uri>
             <pose>{world_x} {world_y} {world_z} 0 0 {yaw}</pose>
-        </include>
-        """
+{scale_xml}        </include>
+        '''
         return tree_xml
 
     def generate_trees(self):
         self.get_logger().info(
             f"Generating {self.num_trees} trees on heightmap {self.heightmap_file}..."
         )
+
+        if not self._has_tree_types():
+            return []
 
         heightmap_data = self.load_heightmap()
         if heightmap_data is None:
@@ -196,7 +247,7 @@ class TreeGenerator(TerrainHelper):
 
             if self.is_valid_tree_position(px, py, trees):
                 tree_type = random.choice(self.tree_types)
-                trees.append((px, py, tree_type))
+                trees.append(TreeInstance(px=px, py=py, tree_type=tree_type))
                 if len(trees) == 1:
                     world_x, world_y, world_z = self.pixel_to_world(px, py)
                     self.get_logger().info(
@@ -209,12 +260,88 @@ class TreeGenerator(TerrainHelper):
         self.get_logger().info(f"Tree placement completed. {len(trees)} trees placed.")
         return trees
 
+    def generate_orchard_grid_trees(self):
+        self.get_logger().info(
+            "Generating orchard grid: rows=%d, cols=%d, tree_spacing=%.2fm, row_spacing=%.2fm"
+            % (
+                self.orchard_rows,
+                self.orchard_cols,
+                self.orchard_tree_spacing,
+                self.orchard_row_spacing,
+            )
+        )
+
+        if not self._has_tree_types():
+            return []
+
+        heightmap_data = self.load_heightmap()
+        if heightmap_data is None:
+            self.get_logger().error(
+                "Heightmap data could not be loaded. Aborting orchard generation."
+            )
+            return []
+
+        yaw = math.radians(self.orchard_yaw_deg)
+        cos_yaw = math.cos(yaw)
+        sin_yaw = math.sin(yaw)
+        scale_low = min(self.scale_min, self.scale_max)
+        scale_high = max(self.scale_min, self.scale_max)
+        accepted = []
+        skipped = 0
+
+        for row in range(self.orchard_rows):
+            for col in range(self.orchard_cols):
+                local_x = col * self.orchard_tree_spacing
+                local_y = row * self.orchard_row_spacing
+                world_x = self.orchard_origin_x + local_x * cos_yaw - local_y * sin_yaw
+                world_y = self.orchard_origin_y + local_x * sin_yaw + local_y * cos_yaw
+
+                if self.orchard_jitter_xy > 0.0:
+                    world_x += random.uniform(-self.orchard_jitter_xy, self.orchard_jitter_xy)
+                    world_y += random.uniform(-self.orchard_jitter_xy, self.orchard_jitter_xy)
+
+                px, py = self.world_to_pixel(world_x, world_y)
+                if not self._is_valid_pixel(px, py, heightmap_data):
+                    skipped += 1
+                    continue
+
+                slope = self.calculate_scope(px, py)
+                if slope >= self.max_slope:
+                    skipped += 1
+                    continue
+
+                tree_type = random.choice(self.tree_types)
+                scale = random.uniform(scale_low, scale_high)
+                accepted.append(
+                    TreeInstance(
+                        px=px,
+                        py=py,
+                        tree_type=tree_type,
+                        yaw=yaw,
+                        scale=scale,
+                        name=f"{tree_type}_r{row}_c{col}",
+                    )
+                )
+
+        self.get_logger().info(
+            "Generated orchard grid: accepted %d trees, skipped %d invalid positions"
+            % (len(accepted), skipped)
+        )
+        return accepted
+
     def generate_trees_xml(self, trees):
         trees_xml = "\n    <!-- Auto-generated trees -->\n"
-        for i, (px, py, tree_type) in enumerate(trees):
-            world_x, world_y, world_z = self.pixel_to_world(px, py)
+        for i, tree in enumerate(trees):
+            world_x, world_y, world_z = self.pixel_to_world(tree.px, tree.py)
             trees_xml += self.create_tree_include_xml(
-                tree_type, world_x, world_y, world_z, i
+                tree.tree_type,
+                world_x,
+                world_y,
+                world_z,
+                i,
+                yaw=tree.yaw,
+                scale=tree.scale,
+                name=tree.name,
             )
         trees_xml += "    <!-- End auto-generated trees -->\n"
         return trees_xml
@@ -234,8 +361,8 @@ class RoadGenerator(TerrainHelper):
         self.road_min_tree_dist = node.road_min_tree_dist
         self.tree_world_pos = []
 
-        for px, py, _ in trees:
-            wx, wy, _ = self.pixel_to_world(px, py)
+        for tree in trees:
+            wx, wy, _ = self.pixel_to_world(tree.px, tree.py)
             self.tree_world_pos.append((wx, wy))
 
         self.get_logger().info(
@@ -463,6 +590,20 @@ class ForestMapGenerator(Node):
         self.declare_parameter("road_width", 1.0)
         self.declare_parameter("road_min_tree_dist", 3.0)
 
+        self.declare_parameter("placement_mode", "random")
+        self.declare_parameter("enable_road_generation", True)
+        self.declare_parameter("orchard_origin_x", -40.0)
+        self.declare_parameter("orchard_origin_y", -30.0)
+        self.declare_parameter("orchard_rows", 12)
+        self.declare_parameter("orchard_cols", 20)
+        self.declare_parameter("orchard_tree_spacing", 4.0)
+        self.declare_parameter("orchard_row_spacing", 5.0)
+        self.declare_parameter("orchard_yaw_deg", 0.0)
+        self.declare_parameter("orchard_jitter_xy", 0.0)
+        self.declare_parameter("random_seed", 0)
+        self.declare_parameter("scale_min", 1.0)
+        self.declare_parameter("scale_max", 1.0)
+
         self.heightmap_file = self.get_parameter("heightmap_file").value
         self.num_trees = self.get_parameter("num_trees").value
         self.tree_types = self.get_parameter("tree_types").value
@@ -475,6 +616,24 @@ class ForestMapGenerator(Node):
         self.road_length = self.get_parameter("road_length").value
         self.road_width = self.get_parameter("road_width").value
         self.road_min_tree_dist = self.get_parameter("road_min_tree_dist").value
+
+        self.placement_mode = self.get_parameter("placement_mode").value
+        self.enable_road_generation = self.get_parameter("enable_road_generation").value
+        self.orchard_origin_x = self.get_parameter("orchard_origin_x").value
+        self.orchard_origin_y = self.get_parameter("orchard_origin_y").value
+        self.orchard_rows = self.get_parameter("orchard_rows").value
+        self.orchard_cols = self.get_parameter("orchard_cols").value
+        self.orchard_tree_spacing = self.get_parameter("orchard_tree_spacing").value
+        self.orchard_row_spacing = self.get_parameter("orchard_row_spacing").value
+        self.orchard_yaw_deg = self.get_parameter("orchard_yaw_deg").value
+        self.orchard_jitter_xy = self.get_parameter("orchard_jitter_xy").value
+        self.random_seed = self.get_parameter("random_seed").value
+        self.scale_min = self.get_parameter("scale_min").value
+        self.scale_max = self.get_parameter("scale_max").value
+
+        if self.random_seed >= 0:
+            random.seed(self.random_seed)
+        # Use random_seed < 0 for non-deterministic placement while tuning.
 
         self.package_path = get_package_share_directory("forest_map_generator")
 
@@ -516,11 +675,40 @@ class ForestMapGenerator(Node):
             return False
 
     def run_generation(self):
-        trees = self.tree_generator.generate_trees()
+        placement_mode = str(self.placement_mode).strip().lower()
+        self.get_logger().info(f"Placement mode: {placement_mode}")
+
+        if placement_mode == "random":
+            trees = self.tree_generator.generate_trees()
+        elif placement_mode == "orchard_grid":
+            self.get_logger().info(
+                "Orchard grid rows=%d cols=%d tree_spacing=%.2f row_spacing=%.2f yaw=%.2f deg"
+                % (
+                    self.orchard_rows,
+                    self.orchard_cols,
+                    self.orchard_tree_spacing,
+                    self.orchard_row_spacing,
+                    self.orchard_yaw_deg,
+                )
+            )
+            trees = self.tree_generator.generate_orchard_grid_trees()
+        else:
+            self.get_logger().error(
+                f"Unsupported placement_mode '{self.placement_mode}'. "
+                "Use 'random' or 'orchard_grid'."
+            )
+            return
+
+        self.get_logger().info(f"Generated tree count: {len(trees)}")
         trees_xml = self.tree_generator.generate_trees_xml(trees) if trees else ""
 
-        self.road_generator = RoadGenerator(self, trees)
-        roads_xml = self.road_generator.generate_roads()
+        if self.enable_road_generation:
+            self.get_logger().info("Road generation enabled")
+            self.road_generator = RoadGenerator(self, trees)
+            roads_xml = self.road_generator.generate_roads()
+        else:
+            self.get_logger().info("Road generation disabled")
+            roads_xml = ""
 
         if self.generate_final_world_file(trees_xml, roads_xml):
             self.get_logger().info("Generation completed successfully!")
