@@ -56,9 +56,11 @@ The core workflow is:
    - This ensures the heightmap is discoverable by Gazebo at runtime.
 
 4) **Generate the forest world**
-   - `forest_map_generator/forest_map_generator.py` (ROS 2 node) generates a new `.world` file by inserting:
-     - randomly placed tree `<include>` blocks (slope-aware and minimum-distance constrained)
-     - an automatically generated road mesh (`models/road/meshes/road.stl`) and the corresponding road `<include>`
+   - `tree_generator.launch.py` reads a shared YAML config file and starts `forest_map_generator/forest_map_generator.py`.
+   - The node generates a new `.world` file by inserting:
+     - randomly placed or file-driven tree `<include>` blocks
+     - an optional generated road mesh (`models/road/meshes/road.stl`) and the corresponding road `<include>`
+   - `gazebo.launch.py` reads the same YAML config so Gazebo opens the generated world named in `common.world_name`.
    - Tree and road placement are evaluated directly on the heightmap using shared terrain logic.
 
 5) **Create Gazebo-ready tree models from point clouds (optional)**
@@ -104,6 +106,9 @@ forest_map_generator/
 │   ├── gazebo.launch.py
 │   └── tree_generator.launch.py
 │
+├── config/
+│   └── sample_forest_map_generator.yaml  # Shared YAML config example
+│
 └── docs/
     └── images/
         └── gazebo_overview.png
@@ -126,6 +131,29 @@ forest_map_generator/
 
 - 'ply_to_gazebo_textured pipeline': converts colored point clouds into textured Gazebo-ready meshes using Open3D and Blender texture baking.
 
+
+### YAML Launch Configuration
+
+Runtime settings are kept in a shared YAML file. The repository provides `config/sample_forest_map_generator.yaml`; copy it to a local config before editing:
+
+```bash
+cp config/sample_forest_map_generator.yaml config/forest_map_generator.yaml
+```
+
+Use the same file for generation and Gazebo:
+
+```bash
+export FOREST_CONFIG=/path/to/config/forest_map_generator.yaml
+ros2 launch forest_map_generator tree_generator.launch.py config_file:=$FOREST_CONFIG
+ros2 launch forest_map_generator gazebo.launch.py config_file:=$FOREST_CONFIG
+```
+
+Important sections:
+
+- `common.world_name`: generated world filename shared by tree generation and Gazebo.
+- `tree_generator`: ROS 2 node parameters for heightmap, terrain geometry, placement mode, and road generation.
+- `gazebo`: world/model directories and Gazebo verbosity/run options.
+
 ### 1. ForestMapGenerator (ROS 2 Node)
 
 **Location**
@@ -144,12 +172,28 @@ The node samples valid placements directly on the terrain heightmap, converts he
 3. Convert heightmap pixels to world-frame poses
 4. Inject generated tree instances into a new Gazebo world file
 
-**Launch Command**
-```text
-ros2 launch forest_map_generator tree_generator.launch.py
+**Launch Commands**
+
+Prepare a local YAML config first:
+
+```bash
+cp config/sample_forest_map_generator.yaml config/forest_map_generator.yaml
 ```
 
-The node writes a generated world file to the package worlds/ directory (see output_world_file below).
+Generate the world:
+
+```bash
+export FOREST_CONFIG=/path/to/forest_map_generator/config/forest_map_generator.yaml
+ros2 launch forest_map_generator tree_generator.launch.py config_file:=$FOREST_CONFIG
+```
+
+Open the generated world in Gazebo using the same config:
+
+```bash
+ros2 launch forest_map_generator gazebo.launch.py config_file:=$FOREST_CONFIG
+```
+
+Both launch files read the same YAML. `tree_generator.launch.py` uses the `tree_generator` section, and `gazebo.launch.py` uses `common` and `gazebo`. The node writes a generated world file to the package `worlds/` directory; by default the filename comes from `common.world_name`.
 
 **Parameters**
 
@@ -160,7 +204,10 @@ The node writes a generated world file to the package worlds/ directory (see out
 | `tree_types` | `list[string]` | List of Gazebo model names available under `models/` (e.g., `tree1`–`tree14`). A random type is selected per placement. |
 | `terrain_size_x` | `int` | Heightmap resolution in X (pixels). Must match the heightmap image width. |
 | `terrain_size_y` | `int` | Heightmap resolution in Y (pixels). Must match the heightmap image height. |
-| `terrain_size_z` | `float` | Terrain vertical scale in meters used to convert heightmap values to world Z. |
+| `terrain_world_size_x` | `float` | Terrain width in Gazebo/world meters. |
+| `terrain_world_size_y` | `float` | Terrain depth in Gazebo/world meters. |
+| `terrain_size_z` | `float` | Terrain vertical height range in meters used to convert heightmap values to world Z. |
+| `tree_z_offset` | `float` | Model-origin correction applied to every generated tree pose Z. |
 | `min_tree_distance` | `float` | Minimum allowed distance (meters) between any two trees. |
 | `max_slope` | `float` | Maximum allowed slope (degrees) for valid placements. Trees are rejected on steep terrain. |
 | `output_world_file` | `string` | Output world filename written to `worlds/` (e.g., `world_with_trees.world`). |
@@ -185,31 +232,43 @@ What is written into the world
 - The terrain model and heightmap are pre-loaded in Gazebo
 - All tree models listed in `tree_types` exist under `models/`
 
-**Example Launch Parameters**
-```text
-Node(
-    package="forest_map_generator",
-    executable="forest_map_generator",
-    name="forest_map_generator",
-    output="screen",
-    parameters=[
-        {
-            "heightmap_file": "heightmap.png",
-            "num_trees": 200,
-            "tree_types": [
-                "tree1","tree2","tree3","tree4","tree5","tree6","tree7",
-                "tree8","tree9","tree10","tree11","tree12","tree13","tree14",
-            ],
-            "terrain_size_x": 257,
-            "terrain_size_y": 257,
-            "terrain_size_z": 50,
-            "min_tree_distance": 5.0,
-            "max_slope": 30.0,
-            "output_world_file": "world_with_trees.world",
-        }
-    ],
-)
+**Example YAML Configuration**
+
+`tree_generator.launch.py` now reads parameters from YAML instead of keeping a large parameter dictionary in the launch file.
+
+```yaml
+common:
+  world_name: world_with_trees.world
+
+gazebo:
+  run: true
+  verbose: 4
+  world_dir: worlds
+  model_dir: models
+
+tree_generator:
+  heightmap_file: orchard_heightmap.png
+  num_trees: 200
+  tree_types: [tree1, tree2, tree3, tree4, tree5, tree6, tree7]
+
+  # Image dimensions in pixels.
+  terrain_size_x: 257
+  terrain_size_y: 257
+
+  # Terrain dimensions in Gazebo/world meters.
+  terrain_world_size_x: 257.0
+  terrain_world_size_y: 257.0
+  terrain_size_z: 12.688472747802734
+  tree_z_offset: 0.0
+
+  min_tree_distance: 5.0
+  max_slope: 30.0
+  placement_mode: random
+  placement_file: ""
+  enable_road_generation: false
 ```
+
+`output_world_file` can still be set under `tree_generator`, but if it is omitted the launch file injects `common.world_name` automatically.
 
 **Reproducibility**  
 For fixed parameters and heightmap input, the generation process is stochastic due to randomized tree placement, orientation, and type selection.  
@@ -266,8 +325,9 @@ By centralizing these operations, `TerrainHelper` ensures that terrain assumptio
 **Design Notes**
 
 - Terrain dimensions and scaling are explicitly parameterized using:
-  - `terrain_size_x`, `terrain_size_y` — heightmap resolution
-  - `terrain_size_z` — vertical scale in meters
+  - `terrain_size_x`, `terrain_size_y` — heightmap image resolution in pixels
+  - `terrain_world_size_x`, `terrain_world_size_y` — terrain extents in Gazebo/world meters
+  - `terrain_size_z` — vertical height range in meters
 - All slope checks for trees and roads rely on the same slope computation logic.
 - Boundary regions of the heightmap are conservatively rejected to avoid invalid gradient estimates.
 
@@ -308,7 +368,10 @@ TreeGenerator is responsible for procedural tree placement on the terrain height
 | `heightmap_file` | `string` | Heightmap image filename under models/terrain/heightmaps/. Used for elevation lookup and slope evaluation. |
 | `terrain_size_x` | `int` | Heightmap resolution in X (pixels). |
 | `terrain_size_y` | `int` | Heightmap resolution in Y (pixels). |
+| `terrain_world_size_x` | `float` | Terrain width in Gazebo/world meters. |
+| `terrain_world_size_y` | `float` | Terrain depth in Gazebo/world meters. |
 | `terrain_size_z` | `float` | Terrain vertical scale used to map heightmap values into world-frame Z. |
+| `tree_z_offset` | `float` | Model-origin correction applied to every generated tree pose Z. |
 
 **Execution Flow**
 1) Load the heightmap as a grayscale image and convert it to float32
