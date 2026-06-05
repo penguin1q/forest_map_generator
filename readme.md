@@ -34,7 +34,8 @@ The core workflow is:
 
 1) **Acquire a terrain heightmap**
    - Select a geographic region of interest and export a digital elevation model (DEM) as a heightmap.
-   - Public DEM-to-heightmap services can be used to obtain real-world terrain heightmaps for almost any location worldwide (e.g., https://dx3377.com/dem/heightmap).
+   - `scripts/create_heightmap_from_dem/main.py` can crop DEM / GeoTIFF data into a Gazebo heightmap and optionally export QGIS marker GeoJSON files for the same real-world extent.
+   - Public DEM-to-heightmap services can also be used to obtain real-world terrain heightmaps for almost any location worldwide (e.g., https://dx3377.com/dem/heightmap).
    - Export/download the terrain as a heightmap image and ensure it meets the Gazebo format requirements below.
 
 2) **Prepare a Gazebo-compatible heightmap**
@@ -85,6 +86,9 @@ forest_map_generator/
 │   └── forest_map_generator.py        # ROS 2 node (tree & road generation)
 │
 ├── scripts/
+│   ├── create_heightmap_from_dem/
+│   │   └── main.py                    # DEM / GeoTIFF → heightmap + QGIS markers
+│   │
 │   ├── update_heightmap/
 │   │   └── main.py                    # Heightmap → terrain SDF update
 │   │
@@ -268,10 +272,33 @@ tree_generator:
   max_slope: 30.0
   placement_mode: random
   placement_file: ""
+  geojson_coordinate_mode: local_xy
+  terrain_config_file: ""
   enable_road_generation: false
 ```
 
 `output_world_file` can still be set under `tree_generator`, but if it is omitted the launch file injects `common.world_name` automatically. `terrain_dir` should match a terrain model directory under `models/`; the generated world replaces the default `model://terrain` include with `model://<terrain_dir>`.
+
+**GeoJSON placement modes**
+
+`placement_mode: geojson` supports `Point` and `LineString` features.
+
+- `geojson_coordinate_mode: local_xy`: coordinates are interpreted as Gazebo world `x, y`.
+- `geojson_coordinate_mode: lonlat`: coordinates are interpreted as `[longitude, latitude]` and converted to local ENU `x, y` using `terrain_config_file`.
+
+Example lon/lat run command:
+
+```bash
+ros2 run forest_map_generator forest_map_generator --ros-args \
+  -p placement_mode:=geojson \
+  -p placement_file:=config/qgis_layers/tree_rows.geojson \
+  -p geojson_coordinate_mode:=lonlat \
+  -p terrain_config_file:=config/terrain_config.yaml \
+  -p enable_road_generation:=false \
+  -p output_world_file:=world_qgis_lonlat_test.world
+```
+
+`tree_type` and `tree_types` GeoJSON properties can contain comma-separated candidates, such as `"tree1,tree2,tree3"`. One candidate is randomly selected per generated tree.
 
 **Reproducibility**  
 For fixed parameters and heightmap input, the generation process is stochastic due to randomized tree placement, orientation, and type selection.  
@@ -547,6 +574,23 @@ models/terrain/model.sdf.bak_<YYYYMMDD_HHMMSS>
 **Notes**
 - The script edits every `<heightmap>` block found in the SDF (supports multiple occurrences).
 - The script prints the final computed `uri`, `size`, `pos`, and copy destination for verification before writing.
+
+
+### QGIS marker GeoJSON helper
+
+`scripts/create_heightmap_from_dem/main.py` can write helper GeoJSON files for QGIS when DEM-derived terrain is generated.
+Pass `--output-qgis-markers-dir config/qgis_markers` to create:
+
+```text
+config/qgis_markers/terrain_extent.geojson
+config/qgis_markers/terrain_corners.geojson
+config/qgis_markers/terrain_grid.geojson
+```
+
+The marker coordinates are standard `[longitude, latitude]`. They visualize the generated terrain extent, corner/center points, and local Gazebo coordinate grid in QGIS.
+These files are for visualization and editing only; the ROS node does not consume the marker files directly.
+Use `--no-grid` to skip grid generation, or `--grid-step-m <meters>` to change the grid spacing.
+When markers are generated, `terrain_config.yaml` records their paths under `qgis_markers`.
 
 
 ### 6. ply_to_gazebo_textured pipeline (PLY → Gazebo Tree Model)

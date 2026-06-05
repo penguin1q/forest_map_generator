@@ -11,11 +11,57 @@ from typing import Optional
 
 import numpy as np
 try:
+    from pyproj import CRS, Transformer
+except ImportError:
+    CRS = None
+    Transformer = None
+try:
+    import yaml
+except ImportError:
+    yaml = None
+try:
     from stl import mesh
 except ImportError:
     mesh = None
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
+
+
+def utm_crs_from_lonlat(lon, lat):
+    zone = int((float(lon) + 180.0) / 6.0) + 1
+    epsg = 32600 + zone if float(lat) >= 0.0 else 32700 + zone
+    return CRS.from_epsg(epsg)
+
+
+class GeojsonLonLatConverter:
+    def __init__(self, origin_lat, origin_lon, world_yaw_deg):
+        if CRS is None or Transformer is None:
+            raise RuntimeError(
+                "pyproj is required for geojson_coordinate_mode=lonlat"
+            )
+
+        self.origin_lat = float(origin_lat)
+        self.origin_lon = float(origin_lon)
+        self.world_yaw_deg = float(world_yaw_deg)
+        self.utm_crs = utm_crs_from_lonlat(self.origin_lon, self.origin_lat)
+        self.to_utm = Transformer.from_crs(
+            CRS.from_epsg(4326), self.utm_crs, always_xy=True
+        )
+        self.origin_easting, self.origin_northing = self.to_utm.transform(
+            self.origin_lon, self.origin_lat
+        )
+
+    def lonlat_to_world_xy(self, lon, lat):
+        easting, northing = self.to_utm.transform(float(lon), float(lat))
+        east = easting - self.origin_easting
+        north = northing - self.origin_northing
+
+        # world_yaw_deg is the rotation from local ENU into the Gazebo world frame.
+        # Positive yaw rotates the ENU vector clockwise in this inverse mapping.
+        yaw = math.radians(self.world_yaw_deg)
+        world_x = east * math.cos(yaw) + north * math.sin(yaw)
+        world_y = -east * math.sin(yaw) + north * math.cos(yaw)
+        return world_x, world_y
 
 
 @dataclass
@@ -158,6 +204,7 @@ class TreeGenerator(TerrainHelper):
         self.min_tree_distance = node.min_tree_distance
         self.placement_file = node.placement_file
         self.geojson_coordinate_mode = node.geojson_coordinate_mode
+        self.terrain_config_file = node.terrain_config_file
         self.tree_z_offset = node.tree_z_offset
         self.orchard_origin_x = node.orchard_origin_x
         self.orchard_origin_y = node.orchard_origin_y
@@ -342,20 +389,18 @@ class TreeGenerator(TerrainHelper):
         )
         return accepted
 
-    def _resolve_placement_file(self):
-        placement_file = str(self.placement_file).strip()
-        if not placement_file:
-            self.get_logger().error(
-                "placement_file is empty. Set it when placement_mode is csv_points."
-            )
+    def _resolve_package_relative_file(self, file_value, empty_message):
+        file_value = str(file_value).strip()
+        if not file_value:
+            self.get_logger().error(empty_message)
             return None
 
-        if os.path.isabs(placement_file):
-            return placement_file
+        if os.path.isabs(file_value):
+            return file_value
 
         candidates = [
-            os.path.join(self.package_path, placement_file),
-            os.path.abspath(placement_file),
+            os.path.join(self.package_path, file_value),
+            os.path.abspath(file_value),
         ]
 
         install_marker = os.path.join(
@@ -364,7 +409,7 @@ class TreeGenerator(TerrainHelper):
         if install_marker in self.package_path:
             workspace_root = self.package_path.split(install_marker)[0].rstrip(os.sep)
             candidates.append(
-                os.path.join(workspace_root, "src", "forest_map_generator", placement_file)
+                os.path.join(workspace_root, "src", "forest_map_generator", file_value)
             )
 
         for candidate in candidates:
@@ -372,6 +417,18 @@ class TreeGenerator(TerrainHelper):
                 return candidate
 
         return candidates[0]
+
+    def _resolve_placement_file(self):
+        return self._resolve_package_relative_file(
+            self.placement_file,
+            "placement_file is empty. Set it when placement_mode needs an input file.",
+        )
+
+    def _resolve_terrain_config_file(self):
+        return self._resolve_package_relative_file(
+            self.terrain_config_file,
+            "terrain_config_file is empty. Set it for geojson_coordinate_mode=lonlat.",
+        )
 
     def _csv_cell(self, row, key):
         value = row.get(key, "")
@@ -585,6 +642,117 @@ class TreeGenerator(TerrainHelper):
             )
             return None
 
+    def _parse_geojson_lonlat(self, coordinates, context, converter):
+        if not isinstance(coordinates, (list, tuple)) or len(coordinates) < 2:
+            self.get_logger().warn(
+                "GeoJSON %s: invalid coordinates; expected [lon, lat]." % context
+            )
+            return None
+
+        try:
+            lon = float(coordinates[0])
+            lat = float(coordinates[1])
+        except (TypeError, ValueError):
+            self.get_logger().warn(
+                "GeoJSON %s: invalid coordinates; lon and lat must be numeric."
+                % context
+            )
+            return None
+
+        return converter.lonlat_to_world_xy(lon, lat)
+
+    def _parse_geojson_world_xy(self, coordinates, context, coordinate_mode, converter):
+        if coordinate_mode == "local_xy":
+            return self._parse_geojson_xy(coordinates, context)
+        if coordinate_mode == "lonlat":
+            return self._parse_geojson_lonlat(coordinates, context, converter)
+        return None
+
+    def _geojson_tree_type_candidates(self, properties, context):
+        tree_type_value = self._geojson_property(properties, "tree_type")
+        if tree_type_value == "":
+            tree_type_value = self._geojson_property(properties, "tree_types")
+
+        candidates = [
+            candidate.strip()
+            for candidate in tree_type_value.split(",")
+            if candidate.strip()
+        ]
+        if candidates:
+            return candidates
+
+        fallback = self._geojson_default_tree_type(context)
+        return [] if fallback is None else [fallback]
+
+    def _choose_geojson_tree_type(self, candidates):
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        return random.choice(candidates)
+
+    def _load_geojson_lonlat_converter(self):
+        if yaml is None:
+            self.get_logger().error(
+                "PyYAML is required for geojson_coordinate_mode=lonlat."
+            )
+            return None
+
+        terrain_config_path = self._resolve_terrain_config_file()
+        if terrain_config_path is None:
+            return None
+
+        self.get_logger().info(
+            "Reading terrain config: %s" % terrain_config_path
+        )
+        if not os.path.exists(terrain_config_path):
+            self.get_logger().error(
+                "terrain_config_file does not exist: %s" % terrain_config_path
+            )
+            return None
+
+        try:
+            with open(terrain_config_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError) as e:
+            self.get_logger().error(
+                "Failed to read terrain_config_file: %s" % e
+            )
+            return None
+
+        georef = config.get("georeference", {})
+        if not isinstance(georef, dict):
+            self.get_logger().error(
+                "terrain_config_file georeference section must be a mapping."
+            )
+            return None
+
+        origin_lat = georef.get("origin_lat_deg", georef.get("center_lat_deg"))
+        origin_lon = georef.get("origin_lon_deg", georef.get("center_lon_deg"))
+        if origin_lat is None or origin_lon is None:
+            self.get_logger().error(
+                "terrain_config_file needs georeference origin_lat_deg/origin_lon_deg "
+                "or center_lat_deg/center_lon_deg for lonlat mode."
+            )
+            return None
+
+        world_yaw_deg = georef.get("world_yaw_deg", 0.0)
+        try:
+            converter = GeojsonLonLatConverter(origin_lat, origin_lon, world_yaw_deg)
+        except (TypeError, ValueError, RuntimeError) as e:
+            self.get_logger().error(
+                "Failed to initialize GeoJSON lon/lat converter: %s" % e
+            )
+            return None
+
+        self.get_logger().info(
+            "GeoJSON origin: lat=%.9f, lon=%.9f"
+            % (converter.origin_lat, converter.origin_lon)
+        )
+        self.get_logger().info("Using UTM CRS: %s" % converter.utm_crs)
+        self.get_logger().info("world_yaw_deg: %.3f" % converter.world_yaw_deg)
+        return converter
+
     def interpolate_points_along_polyline(
         self, coords, spacing, start_offset=0.0, end_offset=0.0
     ):
@@ -673,15 +841,19 @@ class TreeGenerator(TerrainHelper):
     def generate_geojson_trees(self):
         coordinate_mode = str(self.geojson_coordinate_mode).strip().lower()
         self.get_logger().info(f"GeoJSON coordinate mode: {coordinate_mode}")
-        if coordinate_mode != "local_xy":
+        if coordinate_mode not in ("local_xy", "lonlat"):
             self.get_logger().error(
-                "Unsupported geojson_coordinate_mode '%s'. Use 'local_xy'."
+                "Unsupported geojson_coordinate_mode '%s'. Use 'local_xy' or 'lonlat'."
                 % self.geojson_coordinate_mode
             )
             return []
 
-        # Phase 3 treats GeoJSON coordinates as local Gazebo world XY.
-        # No CRS transformation or lon/lat conversion is performed here.
+        lonlat_converter = None
+        if coordinate_mode == "lonlat":
+            lonlat_converter = self._load_geojson_lonlat_converter()
+            if lonlat_converter is None:
+                return []
+
         geojson_path = self._resolve_placement_file()
         if geojson_path is None:
             return []
@@ -745,12 +917,18 @@ class TreeGenerator(TerrainHelper):
             geometry_type = geometry.get("type")
             coordinates = geometry.get("coordinates")
 
-            tree_type = self._geojson_property(properties, "tree_type")
-            if tree_type == "":
-                tree_type = self._geojson_default_tree_type(context)
-                if tree_type is None:
-                    skipped_features += 1
-                    continue
+            tree_type_candidates = self._geojson_tree_type_candidates(
+                properties, context
+            )
+            if not tree_type_candidates:
+                skipped_features += 1
+                continue
+            feature_name = self._geojson_property(properties, "name") or context
+            if len(tree_type_candidates) > 1:
+                self.get_logger().info(
+                    "Tree type candidates for %s: %s"
+                    % (feature_name, ", ".join(tree_type_candidates))
+                )
             yaw, _ = self._parse_geojson_optional_float(
                 self._geojson_property(properties, "yaw"), 0.0, context, "yaw"
             )
@@ -760,9 +938,22 @@ class TreeGenerator(TerrainHelper):
             z_value = self._geojson_property(properties, "z")
 
             if geometry_type == "Point":
-                xy = self._parse_geojson_xy(coordinates, context)
+                xy = self._parse_geojson_world_xy(
+                    coordinates, context, coordinate_mode, lonlat_converter
+                )
                 if xy is None:
                     skipped_positions += 1
+                    continue
+
+                if coordinate_mode == "lonlat":
+                    self.get_logger().info(
+                        "Point feature %s converted lon/lat to x/y: %.3f, %.3f"
+                        % (feature_name, xy[0], xy[1])
+                    )
+
+                tree_type = self._choose_geojson_tree_type(tree_type_candidates)
+                if tree_type is None:
+                    skipped_features += 1
                     continue
 
                 name = self._geojson_property(properties, "name")
@@ -808,7 +999,12 @@ class TreeGenerator(TerrainHelper):
                 line_coords = []
                 malformed = False
                 for coord_index, coord in enumerate(coordinates):
-                    xy = self._parse_geojson_xy(coord, "%s coordinate %d" % (context, coord_index))
+                    xy = self._parse_geojson_world_xy(
+                        coord,
+                        "%s coordinate %d" % (context, coord_index),
+                        coordinate_mode,
+                        lonlat_converter,
+                    )
                     if xy is None:
                         malformed = True
                         break
@@ -854,6 +1050,10 @@ class TreeGenerator(TerrainHelper):
                     continue
 
                 for point_index, (world_x, world_y) in enumerate(candidate_points):
+                    tree_type = self._choose_geojson_tree_type(tree_type_candidates)
+                    if tree_type is None:
+                        skipped_features += 1
+                        break
                     name = f"{name_prefix}_{point_index:04d}"
                     tree = self._create_geojson_tree(
                         world_x,
@@ -1170,6 +1370,7 @@ class ForestMapGenerator(Node):
         self.declare_parameter("placement_mode", "random")
         self.declare_parameter("placement_file", "")
         self.declare_parameter("geojson_coordinate_mode", "local_xy")
+        self.declare_parameter("terrain_config_file", "")
         self.declare_parameter("enable_road_generation", True)
         self.declare_parameter("orchard_origin_x", -40.0)
         self.declare_parameter("orchard_origin_y", -30.0)
@@ -1203,6 +1404,7 @@ class ForestMapGenerator(Node):
         self.placement_mode = self.get_parameter("placement_mode").value
         self.placement_file = self.get_parameter("placement_file").value
         self.geojson_coordinate_mode = self.get_parameter("geojson_coordinate_mode").value
+        self.terrain_config_file = self.get_parameter("terrain_config_file").value
         self.enable_road_generation = self.get_parameter("enable_road_generation").value
         self.orchard_origin_x = self.get_parameter("orchard_origin_x").value
         self.orchard_origin_y = self.get_parameter("orchard_origin_y").value

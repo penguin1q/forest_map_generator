@@ -45,6 +45,8 @@ def _launch_setup(context, *args, **kwargs):
     world_name = common_config.get("world_name", "world_with_trees.world")
     tree_params = dict(tree_params)
     tree_params.setdefault("output_world_file", world_name)
+    tree_params.setdefault("geojson_coordinate_mode", "local_xy")
+    tree_params.setdefault("terrain_config_file", "")
 
     return [
         Node(

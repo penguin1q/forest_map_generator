@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import json
+import math
 import shutil
 import sys
 import xml.etree.ElementTree as ET
@@ -52,6 +54,281 @@ def utm_crs_for_lonlat(lon, lat):
     zone = int((lon + 180.0) // 6.0) + 1
     epsg = 32600 + zone if lat >= 0.0 else 32700 + zone
     return CRS.from_epsg(epsg)
+
+
+class LocalLonLatProjector:
+    def __init__(self, center_lat, center_lon):
+        self.target_crs = utm_crs_for_lonlat(center_lon, center_lat)
+        self.to_utm = Transformer.from_crs(
+            "EPSG:4326", self.target_crs, always_xy=True
+        )
+        self.to_lonlat = Transformer.from_crs(
+            self.target_crs, "EPSG:4326", always_xy=True
+        )
+        self.center_e, self.center_n = self.to_utm.transform(center_lon, center_lat)
+
+    def local_xy_to_lonlat(self, x_m, y_m):
+        lon, lat = self.to_lonlat.transform(
+            self.center_e + float(x_m), self.center_n + float(y_m)
+        )
+        return [float(lon), float(lat)]
+
+
+def format_meter(value):
+    normalized = 0.0 if abs(value) < 1e-9 else float(value)
+    return f"{normalized:.6f}".rstrip("0").rstrip(".")
+
+
+def write_geojson(path, feature_collection):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(feature_collection, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def terrain_local_extent(width_m, height_m):
+    return {
+        "x_min": -float(width_m) / 2.0,
+        "x_max": float(width_m) / 2.0,
+        "y_min": -float(height_m) / 2.0,
+        "y_max": float(height_m) / 2.0,
+    }
+
+
+def build_extent_geojson(center_lat, center_lon, width_m, height_m, size):
+    extent = terrain_local_extent(width_m, height_m)
+    projector = LocalLonLatProjector(center_lat, center_lon)
+    corners = [
+        (extent["x_min"], extent["y_min"]),
+        (extent["x_max"], extent["y_min"]),
+        (extent["x_max"], extent["y_max"]),
+        (extent["x_min"], extent["y_max"]),
+        (extent["x_min"], extent["y_min"]),
+    ]
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {
+                    "name": "terrain_extent",
+                    "width_m": float(width_m),
+                    "height_m": float(height_m),
+                    "size_px": int(size),
+                    "center_lat_deg": float(center_lat),
+                    "center_lon_deg": float(center_lon),
+                    "world_frame": "ENU",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [projector.local_xy_to_lonlat(x, y) for x, y in corners]
+                    ],
+                },
+            }
+        ],
+    }
+
+
+def build_corners_geojson(center_lat, center_lon, width_m, height_m):
+    extent = terrain_local_extent(width_m, height_m)
+    projector = LocalLonLatProjector(center_lat, center_lon)
+    points = [
+        ("center", 0.0, 0.0),
+        ("southwest", extent["x_min"], extent["y_min"]),
+        ("southeast", extent["x_max"], extent["y_min"]),
+        ("northeast", extent["x_max"], extent["y_max"]),
+        ("northwest", extent["x_min"], extent["y_max"]),
+    ]
+    features = []
+    for name, x_m, y_m in points:
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "name": name,
+                    "local_x_m": float(x_m),
+                    "local_y_m": float(y_m),
+                },
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": projector.local_xy_to_lonlat(x_m, y_m),
+                },
+            }
+        )
+    return {"type": "FeatureCollection", "features": features}
+
+
+def grid_values(min_value, max_value, step_m):
+    start = math.ceil(min_value / step_m)
+    end = math.floor(max_value / step_m)
+    values = {round(i * step_m, 6) for i in range(start, end + 1)}
+    if min_value <= 0.0 <= max_value:
+        values.add(0.0)
+    return sorted(values)
+
+
+def build_grid_geojson(center_lat, center_lon, width_m, height_m, grid_step_m):
+    extent = terrain_local_extent(width_m, height_m)
+    projector = LocalLonLatProjector(center_lat, center_lon)
+    xs = grid_values(extent["x_min"], extent["x_max"], grid_step_m)
+    ys = grid_values(extent["y_min"], extent["y_max"], grid_step_m)
+    features = []
+
+    for x_m in xs:
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "name": f"x_{format_meter(x_m)}",
+                    "axis": "x",
+                    "value_m": float(x_m),
+                },
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        projector.local_xy_to_lonlat(x_m, extent["y_min"]),
+                        projector.local_xy_to_lonlat(x_m, extent["y_max"]),
+                    ],
+                },
+            }
+        )
+
+    for y_m in ys:
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "name": f"y_{format_meter(y_m)}",
+                    "axis": "y",
+                    "value_m": float(y_m),
+                },
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        projector.local_xy_to_lonlat(extent["x_min"], y_m),
+                        projector.local_xy_to_lonlat(extent["x_max"], y_m),
+                    ],
+                },
+            }
+        )
+
+    return {"type": "FeatureCollection", "features": features}
+
+
+def path_for_config(path):
+    try:
+        return str(path.relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(path)
+
+
+def resolve_qgis_marker_outputs(args):
+    marker_dir = (
+        resolve_path(args.output_qgis_markers_dir)
+        if args.output_qgis_markers_dir
+        else None
+    )
+    outputs = {}
+
+    if marker_dir or args.output_extent_geojson:
+        outputs["extent"] = (
+            resolve_path(args.output_extent_geojson)
+            if args.output_extent_geojson
+            else marker_dir / "terrain_extent.geojson"
+        )
+
+    if marker_dir or args.output_corners_geojson:
+        outputs["corners"] = (
+            resolve_path(args.output_corners_geojson)
+            if args.output_corners_geojson
+            else marker_dir / "terrain_corners.geojson"
+        )
+
+    if not args.no_grid and (marker_dir or args.output_grid_geojson):
+        outputs["grid"] = (
+            resolve_path(args.output_grid_geojson)
+            if args.output_grid_geojson
+            else marker_dir / "terrain_grid.geojson"
+        )
+
+    return outputs
+
+
+def filter_qgis_marker_outputs(marker_outputs, width_m, height_m, grid_step_m):
+    outputs = dict(marker_outputs)
+    if "grid" not in outputs:
+        return outputs
+
+    if grid_step_m <= 0.0:
+        print("warning: --grid-step-m must be greater than zero; skipping grid")
+        outputs.pop("grid")
+        return outputs
+
+    extent = terrain_local_extent(width_m, height_m)
+    line_count = len(grid_values(extent["x_min"], extent["x_max"], grid_step_m))
+    line_count += len(grid_values(extent["y_min"], extent["y_max"], grid_step_m))
+    if line_count > 500:
+        print("warning: QGIS grid would generate more than 500 lines; skipping grid")
+        outputs.pop("grid")
+
+    return outputs
+
+
+def build_qgis_markers_config(marker_outputs, grid_step_m):
+    if not marker_outputs:
+        return None
+
+    config = {
+        "coordinate_format": "lonlat",
+    }
+    if "extent" in marker_outputs:
+        config["extent_geojson"] = path_for_config(marker_outputs["extent"])
+    if "corners" in marker_outputs:
+        config["corners_geojson"] = path_for_config(marker_outputs["corners"])
+    if "grid" in marker_outputs:
+        config["grid_geojson"] = path_for_config(marker_outputs["grid"])
+        config["grid_step_m"] = float(grid_step_m)
+    return config
+
+
+def print_qgis_marker_plan(marker_outputs, width_m, height_m, grid_step_m):
+    if not marker_outputs:
+        return
+
+    extent = terrain_local_extent(width_m, height_m)
+    print("local_extent:")
+    print("  x:", f"{extent['x_min']} to {extent['x_max']} m")
+    print("  y:", f"{extent['y_min']} to {extent['y_max']} m")
+    if "extent" in marker_outputs:
+        print("qgis_marker_extent:", marker_outputs["extent"])
+    if "corners" in marker_outputs:
+        print("qgis_marker_corners:", marker_outputs["corners"])
+    if "grid" in marker_outputs:
+        print("qgis_marker_grid:", marker_outputs["grid"])
+        print("grid_step_m:", float(grid_step_m))
+
+
+def write_qgis_marker_files(
+    marker_outputs, center_lat, center_lon, width_m, height_m, size, grid_step_m
+):
+    if "extent" in marker_outputs:
+        write_geojson(
+            marker_outputs["extent"],
+            build_extent_geojson(center_lat, center_lon, width_m, height_m, size),
+        )
+
+    if "corners" in marker_outputs:
+        write_geojson(
+            marker_outputs["corners"],
+            build_corners_geojson(center_lat, center_lon, width_m, height_m),
+        )
+
+    if "grid" in marker_outputs:
+        write_geojson(
+            marker_outputs["grid"],
+            build_grid_geojson(center_lat, center_lon, width_m, height_m, grid_step_m),
+        )
 
 
 def ensure_single(parent, tag, text):
@@ -179,6 +456,7 @@ def write_config(
     height_max_m,
     height_range_m,
     terrain_pos_z,
+    qgis_markers=None,
 ):
     config = {
         "georeference": {
@@ -209,6 +487,9 @@ def write_config(
             "nodata": None if nodata is None else float(nodata),
         },
     }
+    if qgis_markers:
+        config["qgis_markers"] = qgis_markers
+
     with open(output_config, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
 
@@ -234,6 +515,12 @@ def build_parser():
         default=str(pkg_root / "models" / "terrain" / "model.sdf"),
     )
     parser.add_argument("--terrain-pos-z", type=float, default=0.0)
+    parser.add_argument("--output-qgis-markers-dir", default=None)
+    parser.add_argument("--output-extent-geojson", default=None)
+    parser.add_argument("--output-corners-geojson", default=None)
+    parser.add_argument("--output-grid-geojson", default=None)
+    parser.add_argument("--grid-step-m", type=float, default=10.0)
+    parser.add_argument("--no-grid", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -258,6 +545,14 @@ def main():
     if args.size <= 1:
         print("--size must be greater than 1", file=sys.stderr)
         return 1
+
+    marker_outputs = filter_qgis_marker_outputs(
+        resolve_qgis_marker_outputs(args),
+        args.width_m,
+        args.height_m,
+        args.grid_step_m,
+    )
+
     if not is_gazebo_heightmap_size(args.size):
         print(
             "warning: --size is not 2^n + 1; "
@@ -299,6 +594,9 @@ def main():
     print("output_config:", output_config)
     print("copied_to_textures:", copied_to_textures)
     print("updated_terrain_sdf:", updated_terrain_sdf)
+    print_qgis_marker_plan(
+        marker_outputs, args.width_m, args.height_m, args.grid_step_m
+    )
 
     if args.dry_run:
         print("dry_run: no files written")
@@ -323,6 +621,16 @@ def main():
             height_max,
             height_range,
             args.terrain_pos_z,
+            build_qgis_markers_config(marker_outputs, args.grid_step_m),
+        )
+        write_qgis_marker_files(
+            marker_outputs,
+            args.center_lat,
+            args.center_lon,
+            args.width_m,
+            args.height_m,
+            args.size,
+            args.grid_step_m,
         )
 
         if args.output_copy_to_textures:

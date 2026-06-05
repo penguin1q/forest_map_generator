@@ -53,6 +53,12 @@ tree_generator:
   placement_mode: random  # orchard_grid, csv_points, or geojson
   placement_file: ""
   geojson_coordinate_mode: local_xy
+  terrain_config_file: ""
+  # For QGIS lon/lat GeoJSON:
+  # placement_mode: geojson
+  # placement_file: config/qgis_layers/tree_rows.geojson
+  # geojson_coordinate_mode: lonlat
+  # terrain_config_file: config/terrain_config.yaml
   enable_road_generation: false
 
   orchard_origin_x: -40.0
