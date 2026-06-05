@@ -13,6 +13,7 @@ gazebo:
   model_dir: models
 
 tree_generator:
+  terrain_dir: terrain
   heightmap_file: orchard_heightmap.png
   num_trees: 200
   tree_types:

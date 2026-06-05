@@ -12,6 +12,13 @@ from launch_ros.actions import Node
 PACKAGE_NAME = "forest_map_generator"
 
 
+def _default_config_file():
+    config_dir = os.path.join(get_package_share_directory(PACKAGE_NAME), "config")
+    primary = os.path.join(config_dir, "forest_map_generator.yaml")
+    sample = os.path.join(config_dir, "sample_forest_map_generator.yaml")
+    return primary if os.path.exists(primary) else sample
+
+
 def _load_yaml(path):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Config YAML does not exist: {path}")
@@ -51,11 +58,7 @@ def _launch_setup(context, *args, **kwargs):
 
 
 def generate_launch_description():
-    default_config_file = os.path.join(
-        get_package_share_directory(PACKAGE_NAME),
-        "config",
-        "forest_map_generator.yaml",
-    )
+    default_config_file = _default_config_file()
 
     return LaunchDescription(
         [

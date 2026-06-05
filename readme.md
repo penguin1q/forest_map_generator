@@ -152,7 +152,8 @@ Important sections:
 
 - `common.world_name`: generated world filename shared by tree generation and Gazebo.
 - `tree_generator`: ROS 2 node parameters for heightmap, terrain geometry, placement mode, and road generation.
-- `gazebo`: world/model directories and Gazebo verbosity/run options.
+- `tree_generator.terrain_dir`: terrain model directory under `models/`; the generated world uses `model://<terrain_dir>`.
+- `gazebo`: world/model directories and Gazebo verbosity/run options. `gazebo.model_dir` is the parent models directory, normally `models`.
 
 ### 1. ForestMapGenerator (ROS 2 Node)
 
@@ -199,7 +200,8 @@ Both launch files read the same YAML. `tree_generator.launch.py` uses the `tree_
 
 | Parameter | Type | Description |
 |----------|------|-------------|
-| `heightmap_file` | `string` | Heightmap image filename under `models/terrain/heightmaps/`. Used for terrain elevation lookup and slope computation. |
+| `terrain_dir` | `string` | Terrain model directory under `models/`. Also used as the generated world terrain model URI, e.g. `model://terrain`. |
+| `heightmap_file` | `string` | Heightmap image filename under `models/<terrain_dir>/heightmaps/`. Used for terrain elevation lookup and slope computation. |
 | `num_trees` | `int` | Number of trees to generate and inject into the world. |
 | `tree_types` | `list[string]` | List of Gazebo model names available under `models/` (e.g., `tree1`–`tree14`). A random type is selected per placement. |
 | `terrain_size_x` | `int` | Heightmap resolution in X (pixels). Must match the heightmap image width. |
@@ -247,6 +249,7 @@ gazebo:
   model_dir: models
 
 tree_generator:
+  terrain_dir: terrain
   heightmap_file: orchard_heightmap.png
   num_trees: 200
   tree_types: [tree1, tree2, tree3, tree4, tree5, tree6, tree7]
@@ -268,7 +271,7 @@ tree_generator:
   enable_road_generation: false
 ```
 
-`output_world_file` can still be set under `tree_generator`, but if it is omitted the launch file injects `common.world_name` automatically.
+`output_world_file` can still be set under `tree_generator`, but if it is omitted the launch file injects `common.world_name` automatically. `terrain_dir` should match a terrain model directory under `models/`; the generated world replaces the default `model://terrain` include with `model://<terrain_dir>`.
 
 **Reproducibility**  
 For fixed parameters and heightmap input, the generation process is stochastic due to randomized tree placement, orientation, and type selection.  
@@ -299,7 +302,7 @@ By centralizing these operations, `TerrainHelper` ensures that terrain assumptio
 
 - **Heightmap loading**
   - Loads grayscale PNG heightmaps from  
-    `models/terrain/heightmaps/<heightmap_file>`
+    `models/<terrain_dir>/heightmaps/<heightmap_file>`
   - Converts pixel values into floating-point elevation data
   - Reports image dimensions and value range for verification
 
@@ -365,7 +368,8 @@ TreeGenerator is responsible for procedural tree placement on the terrain height
 | `tree_types` | `list[string]` | List of Gazebo model names under models/ (e.g., oak_tree, pine_tree). A random type is selected per placement. |
 | `min_tree_distance` | `float` | Minimum spacing constraint between any two placed trees. |
 | `max_slope` | `float` | Maximum allowable terrain slope in degrees. Candidate points with slope >= max_slope will be rejected. |
-| `heightmap_file` | `string` | Heightmap image filename under models/terrain/heightmaps/. Used for elevation lookup and slope evaluation. |
+| `terrain_dir` | `string` | Terrain model directory under models/. |
+| `heightmap_file` | `string` | Heightmap image filename under models/<terrain_dir>/heightmaps/. Used for elevation lookup and slope evaluation. |
 | `terrain_size_x` | `int` | Heightmap resolution in X (pixels). |
 | `terrain_size_y` | `int` | Heightmap resolution in Y (pixels). |
 | `terrain_world_size_x` | `float` | Terrain width in Gazebo/world meters. |
@@ -490,10 +494,10 @@ scripts/update_heightmap/main.py
 ```
 
 **Role**
-This script updates the terrain model SDF (`models/terrain/model.sdf`) to reference a new heightmap, and ensures the heightmap image is copied into the Gazebo-discoverable model path under `models/terrain/materials/textures/`.
+This script updates the terrain model SDF (`models/<terrain_dir>/model.sdf`) to reference a new heightmap, and ensures the heightmap image is copied into the Gazebo-discoverable model path under `models/<terrain_dir>/materials/textures/`.
 
 It edits the `<heightmap>` block(s) in the SDF, updating:
-- `<uri>`: points to the heightmap under `model://terrain/materials/textures/`
+- `<uri>`: points to the heightmap under `model://<terrain_dir>/materials/textures/`
 - `<size>`: sets `(width, height, height_range)`
 - `<blend>`: ensures exactly two blend entries and updates their `min_height` and `fade_dist`
 - `<pos>`: sets terrain heightmap pose offset
@@ -512,7 +516,7 @@ It edits the `<heightmap>` block(s) in the SDF, updating:
 1) Resolve package paths and defaults
 2) Validate heightmap file exists and read image dimensions `(w, h)`
 3) Construct SDF fields:
-   - `uri = model://terrain/materials/textures/<heightmap_name>`
+   - `uri = model://<terrain_dir>/materials/textures/<heightmap_name>`
    - `size = "w h height_range"`
    - `pos = "pos_x pos_y pos_z"`
 4) Parse the SDF and locate all `<heightmap>` blocks

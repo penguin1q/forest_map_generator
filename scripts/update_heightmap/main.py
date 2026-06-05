@@ -81,14 +81,18 @@ def main():
     os.makedirs(args.target_dir, exist_ok=True)
     dst_heightmap = os.path.join(args.target_dir, os.path.basename(heightmap_path))
 
-    uri = f"model://terrain/materials/textures/{os.path.basename(heightmap_path)}"
+    terrain_sdf_path = os.path.abspath(args.terrain_sdf)
+    terrain_model_name = os.path.basename(os.path.dirname(terrain_sdf_path))
+    uri = (
+        f"model://{terrain_model_name}/materials/textures/"
+        f"{os.path.basename(heightmap_path)}"
+    )
     size = f"{w} {h} {args.height_range}"
     pos = f"{args.pos_x} {args.pos_y} {args.pos_z}"
 
-    terrain_sdf_path = os.path.abspath(args.terrain_sdf)
-
     print("heightmap:", heightmap_path)
     print("heightmap_size:", f"{w}x{h}")
+    print("terrain_model:", terrain_model_name)
     print("terrain_sdf:", terrain_sdf_path)
     print("sdf_uri:", uri)
     print("sdf_size:", size)

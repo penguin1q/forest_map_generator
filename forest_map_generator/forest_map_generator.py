@@ -45,6 +45,7 @@ class TerrainHelper:
         self.terrain_world_size_y = node.terrain_world_size_y
         self.terrain_size_z = node.terrain_size_z
         self.max_slope = node.max_slope
+        self.terrain_dir = node.terrain_dir
 
         self.heightmap_data = None
 
@@ -53,14 +54,14 @@ class TerrainHelper:
             os.path.join(
                 self.package_path,
                 "models",
-                "terrain",
+                self.terrain_dir,
                 "heightmaps",
                 self.heightmap_file,
             ),
             os.path.join(
                 self.package_path,
                 "models",
-                "terrain",
+                self.terrain_dir,
                 "materials",
                 "textures",
                 self.heightmap_file,
@@ -1149,6 +1150,7 @@ class ForestMapGenerator(Node):
         super().__init__("forest_map_generator")
         self.get_logger().info("Forest Map Generator Node started.")
 
+        self.declare_parameter("terrain_dir", "terrain")
         self.declare_parameter("heightmap_file", "heightmap.png")
         self.declare_parameter("num_trees", 50)
         self.declare_parameter("tree_types", ["oak_tree", "pine_tree"])
@@ -1181,6 +1183,7 @@ class ForestMapGenerator(Node):
         self.declare_parameter("scale_min", 1.0)
         self.declare_parameter("scale_max", 1.0)
 
+        self.terrain_dir = self.get_parameter("terrain_dir").value
         self.heightmap_file = self.get_parameter("heightmap_file").value
         self.num_trees = self.get_parameter("num_trees").value
         self.tree_types = self.get_parameter("tree_types").value
@@ -1213,6 +1216,7 @@ class ForestMapGenerator(Node):
         self.scale_min = self.get_parameter("scale_min").value
         self.scale_max = self.get_parameter("scale_max").value
 
+        self.get_logger().info(f"terrain_dir: {self.terrain_dir}")
         self.get_logger().info(
             "heightmap image size: %d x %d px"
             % (self.terrain_size_x, self.terrain_size_y)
@@ -1247,6 +1251,19 @@ class ForestMapGenerator(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to read world file: {e}")
             return False
+
+        terrain_uri = f"model://{self.terrain_dir}"
+        if "<uri>model://terrain</uri>" in world_content:
+            world_content = world_content.replace(
+                "<uri>model://terrain</uri>", f"<uri>{terrain_uri}</uri>"
+            )
+            self.get_logger().info(f"World terrain URI: {terrain_uri}")
+        elif terrain_uri not in world_content:
+            self.get_logger().warn(
+                "Base world does not contain model://terrain or %s; "
+                "check that the world includes the same terrain model used by terrain_dir."
+                % terrain_uri
+            )
 
         combined_xml = roads_xml + trees_xml
 

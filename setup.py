@@ -1,7 +1,36 @@
 from setuptools import setup, find_packages
 from glob import glob
+import os
 
 package_name = "forest_map_generator"
+
+
+def collect_terrain_data_files():
+    data_files = []
+    for terrain_dir in sorted(
+        path for path in glob("models/terrain*") if os.path.isdir(path)
+    ):
+        share_dir = "share/" + package_name + "/" + terrain_dir
+        model_files = [
+            path
+            for path in [
+                os.path.join(terrain_dir, "model.config"),
+                os.path.join(terrain_dir, "model.sdf"),
+            ]
+            if os.path.exists(path)
+        ]
+        if model_files:
+            data_files.append((share_dir, model_files))
+
+        for subdir in [
+            "heightmaps",
+            "materials/textures",
+            "materials/scripts",
+        ]:
+            files = glob(os.path.join(terrain_dir, subdir, "*"))
+            if files:
+                data_files.append((share_dir + "/" + subdir, files))
+    return data_files
 
 setup(
     name=package_name,
@@ -11,29 +40,19 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/worlds", ["worlds/world.world"]),
-        (
-            "share/" + package_name + "/models/terrain/heightmaps",
-            glob("models/terrain/heightmaps/*.png"),
-        ),
-        (
-            "share/" + package_name + "/models/terrain/materials/textures",
-            glob("models/terrain/materials/textures/*.png"),
-        ),
-        (
-            "share/" + package_name + "/models/terrain/materials/scripts",
-            glob("models/terrain/materials/scripts/*"),
-        ),
-        (
-            "share/" + package_name + "/models/terrain",
-            ["models/terrain/model.config", "models/terrain/model.sdf"],
-        ),
+        *collect_terrain_data_files(),
         (
             "share/" + package_name + "/models/road",
             ["models/road/model.config", "models/road/model.sdf"],
         ),
         ("share/" + package_name + "/models/road/meshes", glob("models/road/meshes/*")),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
-        ("share/" + package_name + "/config", glob("config/*.csv") + glob("config/*.geojson") + glob("config/*.yaml")),
+        (
+            "share/" + package_name + "/config",
+            glob("config/*.csv")
+            + glob("config/*.geojson")
+            + glob("config/sample_*.yaml"),
+        ),
         ("share/" + package_name + "/scripts", glob("scripts/*.py")),
         (
             "share/" + package_name + "/scripts/update_heightmap",
