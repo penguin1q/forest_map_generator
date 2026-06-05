@@ -31,9 +31,16 @@ def generate_launch_description():
                             "tree13",
                             "tree14",
                         ],
+                        # terrain_size_x/y are heightmap image dimensions in pixels.
+                        # terrain_world_size_x/y are terrain dimensions in meters.
                         "terrain_size_x": 257,
                         "terrain_size_y": 257,
-                        "terrain_size_z": 32,
+                        "terrain_world_size_x": 257.0,
+                        "terrain_world_size_y": 257.0,
+                        "terrain_size_z": 12.688472747802734,
+                        # If tree models float above the terrain, try -0.2.
+                        # If they sink below it, try 0.2.
+                        "tree_z_offset": 0.0,
                         "min_tree_distance": 5.0,
                         "max_slope": 30.0,
                         "output_world_file": "world_with_trees.world",

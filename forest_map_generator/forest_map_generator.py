@@ -41,6 +41,8 @@ class TerrainHelper:
         self.heightmap_file = node.heightmap_file
         self.terrain_size_x = node.terrain_size_x
         self.terrain_size_y = node.terrain_size_y
+        self.terrain_world_size_x = node.terrain_world_size_x
+        self.terrain_world_size_y = node.terrain_world_size_y
         self.terrain_size_z = node.terrain_size_z
         self.max_slope = node.max_slope
 
@@ -113,9 +115,9 @@ class TerrainHelper:
             self.get_logger().error("No heightmap data for coordinate conversion.")
             return 0.0, 0.0, 0.0
 
-        terrain_world_size_x = 257.0
-        terrain_world_size_y = 257.0
-        terrain_world_size_z = 50.0
+        terrain_world_size_x = float(self.terrain_world_size_x)
+        terrain_world_size_y = float(self.terrain_world_size_y)
+        terrain_world_size_z = float(self.terrain_size_z)
         terrain_world_pos_x = 0.0
         terrain_world_pos_y = 0.0
         terrain_world_pos_z = 0.0
@@ -131,8 +133,8 @@ class TerrainHelper:
         return world_x, world_y, world_z
 
     def world_to_pixel(self, world_x, world_y):
-        terrain_world_size_x = 257.0
-        terrain_world_size_y = 257.0
+        terrain_world_size_x = float(self.terrain_world_size_x)
+        terrain_world_size_y = float(self.terrain_world_size_y)
 
         normalized_x = (world_x / terrain_world_size_x) + 0.5
         normalized_y = -(world_y / terrain_world_size_y) + 0.5
@@ -155,6 +157,7 @@ class TreeGenerator(TerrainHelper):
         self.min_tree_distance = node.min_tree_distance
         self.placement_file = node.placement_file
         self.geojson_coordinate_mode = node.geojson_coordinate_mode
+        self.tree_z_offset = node.tree_z_offset
         self.orchard_origin_x = node.orchard_origin_x
         self.orchard_origin_y = node.orchard_origin_y
         self.orchard_rows = node.orchard_rows
@@ -881,12 +884,23 @@ class TreeGenerator(TerrainHelper):
     def generate_trees_xml(self, trees):
         trees_xml = "\n    <!-- Auto-generated trees -->\n"
         for i, tree in enumerate(trees):
-            pixel_world_x, pixel_world_y, pixel_world_z = self.pixel_to_world(tree.px, tree.py)
+            pixel_world_x, pixel_world_y, pixel_world_z = self.pixel_to_world(
+                tree.px, tree.py
+            )
             world_x = tree.world_x if tree.world_x is not None else pixel_world_x
             world_y = tree.world_y if tree.world_y is not None else pixel_world_y
-            world_z = tree.world_z if tree.world_z is not None else pixel_world_z
+            terrain_z = tree.world_z if tree.world_z is not None else pixel_world_z
+            # tree_z_offset is a model-origin correction and is applied after
+            # either terrain-derived or explicit z.
+            world_z = terrain_z + float(self.tree_z_offset)
+            if i == 0:
+                self.get_logger().info(f"First tree terrain z: {terrain_z:.3f}")
+                self.get_logger().info(
+                    f"First tree final z after offset: {world_z:.3f}"
+                )
             force_scale = any(
-                value is not None for value in (tree.world_x, tree.world_y, tree.world_z)
+                value is not None
+                for value in (tree.world_x, tree.world_y, tree.world_z)
             )
             trees_xml += self.create_tree_include_xml(
                 tree.tree_type,
@@ -1140,7 +1154,10 @@ class ForestMapGenerator(Node):
         self.declare_parameter("tree_types", ["oak_tree", "pine_tree"])
         self.declare_parameter("terrain_size_x", 257)
         self.declare_parameter("terrain_size_y", 257)
-        self.declare_parameter("terrain_size_z", 50)
+        self.declare_parameter("terrain_world_size_x", 257.0)
+        self.declare_parameter("terrain_world_size_y", 257.0)
+        self.declare_parameter("terrain_size_z", 50.0)
+        self.declare_parameter("tree_z_offset", 0.0)
         self.declare_parameter("min_tree_distance", 5.0)
         self.declare_parameter("max_slope", 30.0)
         self.declare_parameter("output_world_file", "world_with_trees_roads.world")
@@ -1169,7 +1186,10 @@ class ForestMapGenerator(Node):
         self.tree_types = self.get_parameter("tree_types").value
         self.terrain_size_x = self.get_parameter("terrain_size_x").value
         self.terrain_size_y = self.get_parameter("terrain_size_y").value
+        self.terrain_world_size_x = self.get_parameter("terrain_world_size_x").value
+        self.terrain_world_size_y = self.get_parameter("terrain_world_size_y").value
         self.terrain_size_z = self.get_parameter("terrain_size_z").value
+        self.tree_z_offset = self.get_parameter("tree_z_offset").value
         self.min_tree_distance = self.get_parameter("min_tree_distance").value
         self.max_slope = self.get_parameter("max_slope").value
         self.output_world_file = self.get_parameter("output_world_file").value
@@ -1192,6 +1212,17 @@ class ForestMapGenerator(Node):
         self.random_seed = self.get_parameter("random_seed").value
         self.scale_min = self.get_parameter("scale_min").value
         self.scale_max = self.get_parameter("scale_max").value
+
+        self.get_logger().info(
+            "heightmap image size: %d x %d px"
+            % (self.terrain_size_x, self.terrain_size_y)
+        )
+        self.get_logger().info(
+            "terrain world size: %.3f x %.3f m"
+            % (self.terrain_world_size_x, self.terrain_world_size_y)
+        )
+        self.get_logger().info(f"terrain height range: {self.terrain_size_z} m")
+        self.get_logger().info(f"tree_z_offset: {self.tree_z_offset}")
 
         if self.random_seed >= 0:
             random.seed(self.random_seed)
@@ -1239,6 +1270,17 @@ class ForestMapGenerator(Node):
     def run_generation(self):
         placement_mode = str(self.placement_mode).strip().lower()
         self.get_logger().info(f"Placement mode: {placement_mode}")
+
+        if int(self.terrain_size_x) <= 1 or int(self.terrain_size_y) <= 1:
+            self.get_logger().error(
+                "terrain_size_x/y must be heightmap image dimensions greater than 1."
+            )
+            return
+        if float(self.terrain_world_size_x) <= 0.0 or float(self.terrain_world_size_y) <= 0.0:
+            self.get_logger().error(
+                "terrain_world_size_x/y must be terrain dimensions greater than 0 meters."
+            )
+            return
 
         if placement_mode == "random":
             trees = self.tree_generator.generate_trees()

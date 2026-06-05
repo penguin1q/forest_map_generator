@@ -2,20 +2,20 @@ georeference:
   coordinate_mode: lonlat
   surface_model: EARTH_WGS84
   world_frame_orientation: ENU
-  center_lat_deg: 35.0
-  center_lon_deg: 139.0
-  origin_lat_deg: 35.0
-  origin_lon_deg: 139.0
-  origin_elevation_m: 232.94737243652344
+  center_lat_deg: 33.868335
+  center_lon_deg: 136.062965
+  origin_lat_deg: 33.868335
+  origin_lon_deg: 136.062965
+  origin_elevation_m: 53.62106704711914
   world_yaw_deg: 0.0
 terrain:
   heightmap_file: orchard_heightmap.png
   size_px: 257
   width_m: 257.0
   height_m: 257.0
-  height_min_m: 232.94737243652344
-  height_max_m: 265.324951171875
-  height_range_m: 32.37757873535156
+  height_min_m: 53.62106704711914
+  height_max_m: 66.30953979492188
+  height_range_m: 12.688472747802734
   terrain_pos_z_m: 0.0
 source_dem:
   path: /workspaces/humble_robotsim/simulator_geometries/gm_el_v2_1_4.tif
