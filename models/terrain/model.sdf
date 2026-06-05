@@ -31,8 +31,8 @@
               <min_height>10.0</min_height>
               <fade_dist>3.0</fade_dist>
             </blend>
-            <uri>model://terrain/materials/textures/heightmap.png</uri>
-            <size>257 257 50.0</size>
+            <uri>model://terrain/materials/textures/orchard_heightmap.png</uri>
+            <size>257.0 257.0 32.37757873535156</size>
             <pos>0.0 0.0 0.0</pos>
           </heightmap>
         </geometry>
@@ -42,8 +42,8 @@
           <heightmap>
             <use_terrain_paging>false</use_terrain_paging>
             <sampling>1 1</sampling>
-            <uri>model://terrain/materials/textures/heightmap.png</uri>
-            <size>257 257 50.0</size>
+            <uri>model://terrain/materials/textures/orchard_heightmap.png</uri>
+            <size>257.0 257.0 32.37757873535156</size>
             <pos>0.0 0.0 0.0</pos>
           <blend><min_height>1.0</min_height><fade_dist>3.0</fade_dist></blend><blend><min_height>10.0</min_height><fade_dist>3.0</fade_dist></blend></heightmap>
         </geometry>

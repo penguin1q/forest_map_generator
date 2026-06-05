@@ -33,11 +33,15 @@ setup(
         ),
         ("share/" + package_name + "/models/road/meshes", glob("models/road/meshes/*")),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
-        ("share/" + package_name + "/config", glob("config/*.csv") + glob("config/*.geojson")),
+        ("share/" + package_name + "/config", glob("config/*.csv") + glob("config/*.geojson") + glob("config/*.yaml")),
         ("share/" + package_name + "/scripts", glob("scripts/*.py")),
         (
             "share/" + package_name + "/scripts/update_heightmap",
             glob("scripts/update_heightmap/*.py"),
+        ),
+        (
+            "share/" + package_name + "/scripts/create_heightmap_from_dem",
+            glob("scripts/create_heightmap_from_dem/*.py"),
         ),
         (
             "share/" + package_name + "/scripts/ply_to_gazebo_textured",

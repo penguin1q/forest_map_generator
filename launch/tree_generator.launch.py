@@ -13,7 +13,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
-                        "heightmap_file": "heightmap.png",
+                        "heightmap_file": "orchard_heightmap.png",
                         "num_trees": 200,
                         "tree_types": [
                             "tree1",
@@ -33,7 +33,7 @@ def generate_launch_description():
                         ],
                         "terrain_size_x": 257,
                         "terrain_size_y": 257,
-                        "terrain_size_z": 50,
+                        "terrain_size_z": 32,
                         "min_tree_distance": 5.0,
                         "max_slope": 30.0,
                         "output_world_file": "world_with_trees.world",
