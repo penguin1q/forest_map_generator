@@ -1,70 +1,69 @@
 #!/usr/bin/env python3
+import os
+
+import yaml
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+PACKAGE_NAME = "forest_map_generator"
+
+
+def _load_yaml(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Config YAML does not exist: {path}")
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Config YAML root must be a mapping: {path}")
+
+    return data
+
+
+def _launch_setup(context, *args, **kwargs):
+    config_file = LaunchConfiguration("config_file").perform(context)
+    config = _load_yaml(config_file)
+
+    common_config = config.get("common", {}) or {}
+    tree_params = config.get("tree_generator", {}) or {}
+
+    if not isinstance(tree_params, dict):
+        raise ValueError("'tree_generator' section must be a mapping")
+
+    world_name = common_config.get("world_name", "world_with_trees.world")
+    tree_params = dict(tree_params)
+    tree_params.setdefault("output_world_file", world_name)
+
+    return [
+        Node(
+            package=PACKAGE_NAME,
+            executable="forest_map_generator",
+            name="forest_map_generator",
+            output="screen",
+            parameters=[tree_params],
+        )
+    ]
+
+
 def generate_launch_description():
+    default_config_file = os.path.join(
+        get_package_share_directory(PACKAGE_NAME),
+        "config",
+        "forest_map_generator.yaml",
+    )
+
     return LaunchDescription(
         [
-            Node(
-                package="forest_map_generator",
-                executable="forest_map_generator",
-                name="forest_map_generator",
-                output="screen",
-                parameters=[
-                    {
-                        "heightmap_file": "orchard_heightmap.png",
-                        "num_trees": 200,
-                        "tree_types": [
-                            "tree1",
-                            "tree2",
-                            "tree3",
-                            "tree4",
-                            "tree5",
-                            "tree6",
-                            "tree7",
-                            "tree8",
-                            "tree9",
-                            "tree10",
-                            "tree11",
-                            "tree12",
-                            "tree13",
-                            "tree14",
-                        ],
-                        # terrain_size_x/y are heightmap image dimensions in pixels.
-                        # terrain_world_size_x/y are terrain dimensions in meters.
-                        "terrain_size_x": 257,
-                        "terrain_size_y": 257,
-                        "terrain_world_size_x": 257.0,
-                        "terrain_world_size_y": 257.0,
-                        "terrain_size_z": 12.688472747802734,
-                        # If tree models float above the terrain, try -0.2.
-                        # If they sink below it, try 0.2.
-                        "tree_z_offset": 0.0,
-                        "min_tree_distance": 5.0,
-                        "max_slope": 30.0,
-                        "output_world_file": "world_with_trees.world",
-                        "placement_mode": "random",  # "orchard_grid", "csv_points", or "geojson"
-                        # To test CSV placement, set placement_mode to "csv_points"
-                        # and placement_file to "config/sample_tree_points.csv".
-                        # To test GeoJSON placement, set placement_mode to "geojson"
-                        # and placement_file to "config/sample_tree_rows.geojson".
-                        "placement_file": "",
-                        "geojson_coordinate_mode": "local_xy",
-                        "enable_road_generation": False,
-                        "orchard_origin_x": -40.0,
-                        "orchard_origin_y": -30.0,
-                        "orchard_rows": 12,
-                        "orchard_cols": 20,
-                        "orchard_tree_spacing": 4.0,
-                        "orchard_row_spacing": 5.0,
-                        "orchard_yaw_deg": 10.0,
-                        "orchard_jitter_xy": 0.3,
-                        "random_seed": 0,
-                        "scale_min": 0.9,
-                        "scale_max": 1.1,
-                    }
-                ],
+            DeclareLaunchArgument(
+                "config_file",
+                default_value=default_config_file,
+                description="Path to the shared forest_map_generator YAML config file",
             ),
+            OpaqueFunction(function=_launch_setup),
         ]
     )
