@@ -1,14 +1,14 @@
-from setuptools import setup, find_packages
-from glob import glob
 import os
+from glob import glob
+
+from setuptools import find_packages, setup
 
 package_name = "forest_map_generator"
 
 
-def collect_model_data_files():
+def collect_model_data_files(models_root="models"):
     data_files = []
 
-    models_root = "models"
     if not os.path.isdir(models_root):
         return data_files
 
@@ -39,7 +39,8 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/worlds", glob("worlds/*.world")),
-        *collect_model_data_files(),
+        *collect_model_data_files("models"),
+        *collect_model_data_files("models_private"),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
         (
             "share/" + package_name + "/config",
