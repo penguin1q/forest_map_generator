@@ -67,6 +67,10 @@ setup(
             glob("scripts/ply_to_gazebo_textured/*.py"),
         ),
         (
+            "share/" + package_name + "/tools/generate_tree_rows_from_areas",
+            glob("tools/generate_tree_rows_from_areas/*.py"),
+        ),
+        (
             "share/" + package_name + "/models/oak_tree/materials/textures",
             glob("models/oak_tree/materials/textures/*.png"),
         ),

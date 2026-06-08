@@ -18,6 +18,7 @@
   <depend>python3-yaml</depend>
   <depend>python3-pyproj</depend>
   <depend>python3-rasterio</depend>
+  <depend>python3-shapely</depend>
   <depend>python3-stl</depend>
   <depend>ros_ign_gazebo</depend>
   <depend>gazebo_msgs</depend>

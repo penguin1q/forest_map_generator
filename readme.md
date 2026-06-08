@@ -300,6 +300,21 @@ ros2 run forest_map_generator forest_map_generator --ros-args \
 
 `tree_type` and `tree_types` GeoJSON properties can contain comma-separated candidates, such as `"tree1,tree2,tree3"`. One candidate is randomly selected per generated tree.
 
+**Generate Rows From Planting Areas**
+
+`tools/generate_tree_rows_from_areas/main.py` is a package-local standalone preprocessing tool for QGIS workflows. It reads lon/lat `planting_areas.geojson`, `row_directions.geojson`, and `terrain_config.yaml`, performs Shapely geometry processing in local ENU meters, then writes lon/lat GeoJSON rows and preview points.
+
+```bash
+python3 tools/generate_tree_rows_from_areas/main.py \
+  --terrain-config config/terrain_config.yaml \
+  --planting-areas config/qgis_layers/planting_areas.geojson \
+  --row-directions config/qgis_layers/row_directions.geojson \
+  --output-tree-rows config/qgis_layers/generated_tree_rows.geojson \
+  --output-tree-points-preview config/qgis_layers/generated_tree_points_preview.geojson
+```
+
+The generated rows are compatible with `placement_mode: geojson`, `geojson_coordinate_mode: lonlat`, and preserve comma-separated `tree_type` candidates.
+
 **Reproducibility**  
 For fixed parameters and heightmap input, the generation process is stochastic due to randomized tree placement, orientation, and type selection.  
 A fixed random seed is planned to be introduced to enable reproducible map generation for benchmarking and evaluation.
