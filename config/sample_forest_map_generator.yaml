@@ -10,7 +10,9 @@ gazebo:
   run: true
   verbose: 4
   world_dir: worlds
-  model_dir: models
+  model_dirs:
+    - models
+    - models_private
 
 tree_generator:
   terrain_dir: terrain

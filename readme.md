@@ -165,7 +165,7 @@ Important sections:
 - `common.world_name`: generated world filename shared by tree generation and Gazebo.
 - `tree_generator`: ROS 2 node parameters for heightmap, terrain geometry, placement mode, and road generation.
 - `tree_generator.terrain_dir`: terrain model directory under `models/`; the generated world uses `model://<terrain_dir>`.
-- `gazebo`: world/model directories and Gazebo verbosity/run options. `gazebo.model_dir` is the parent models directory, normally `models`.
+- `gazebo`: world/model directories and Gazebo verbosity/run options. `gazebo.model_dirs` is a list of parent model directories, normally `models` and optional private directories such as `models_private`.
 
 ### 1. ForestMapGenerator (ROS 2 Node)
 
@@ -258,7 +258,9 @@ gazebo:
   run: true
   verbose: 4
   world_dir: worlds
-  model_dir: models
+  model_dirs:
+    - models
+    - models_private
 
 tree_generator:
   terrain_dir: terrain
