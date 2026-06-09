@@ -81,13 +81,27 @@ Collision priority is:
 5. Other generated modes
 
 - `trunk_cylinder` (default): simple trunk cylinder, suitable for orchard navigation.
-- `thick_branch_cylinders`: trunk plus coarse cylinders for low thick Curve branch segments. Leaves, fruits, thin twigs, and upper crown branches are excluded by name/radius/height filters.
+- `thick_branch_cylinders`: coarse cylinders from Sapling/Curve-derived thick trunk and main branch segments. It does not add the fixed upright trunk cylinder by default. Leaves, fruits, thin twigs, and upper crown branches are excluded by name/radius/height filters. Use `--collision-add-trunk-cylinder` if an additional simple trunk cylinder is desired.
 - `bounding_box`: box covering the visual bounds.
 - `bounding_cylinder`: cylinder covering the visual horizontal extent and height.
 - `visual_decimated_optional`: decimated duplicate of visual meshes; can be expensive in Gazebo.
 - `--collision-file`: copy an existing STL directly to `meshes/tree_collision.stl`.
 
 For best control, create a Blender collection named `collision` containing simplified trunk/main-branch geometry. The converter can export that collection as `tree_collision.stl`.
+
+Optional additive fixed trunk cylinder example:
+
+```bash
+blender --background --python scripts/convert_tree_asset_to_gazebo/convert_tree_asset_to_gazebo.py -- \
+  --input assets_private/orange_tree_mikan_01_prepared.blend \
+  --model-name orange_tree_mikan_01 \
+  --output-dir models_private/orange_tree_mikan_01 \
+  --origin-mode bottom_center \
+  --collision-mode thick_branch_cylinders \
+  --collision-add-trunk-cylinder \
+  --trunk-radius 0.08 \
+  --trunk-height 0.8
+```
 
 ## Origin Modes
 

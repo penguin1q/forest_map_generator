@@ -91,6 +91,12 @@ def parse_args(argv):
         default=True,
         help="Include low thick main-branch curve segments for thick_branch_cylinders.",
     )
+    parser.add_argument(
+        "--collision-add-trunk-cylinder",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Also add the fixed upright trunk cylinder to thick_branch_cylinders collision.",
+    )
     parser.add_argument("--collision-file", help="Existing STL file to copy as meshes/tree_collision.stl")
     parser.add_argument("--copy-textures", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -629,9 +635,16 @@ def create_cylinder_between_points(bpy, mathutils, name, p0, p1, radius, sides):
 
 
 def create_thick_branch_collision(bpy, mathutils, args, branch_segments):
-    collision_objects = create_trunk_collision(bpy, args)
     if not branch_segments:
-        return collision_objects
+        warn("No curve-derived branch collision segments found; falling back to trunk_cylinder.")
+        return create_trunk_collision(bpy, args)
+
+    collision_objects = []
+    if args.collision_add_trunk_cylinder:
+        info("Adding fixed trunk cylinder in addition to curve-derived branch collision.")
+        collision_objects.extend(create_trunk_collision(bpy, args))
+    else:
+        info("Using curve-derived thick branch collision only.")
 
     created = 0
     for index, (p0, p1, radius, source_name) in enumerate(branch_segments):
@@ -651,7 +664,8 @@ def create_thick_branch_collision(bpy, mathutils, args, branch_segments):
     if created:
         info(f"Generated {created} coarse thick-branch collision cylinders")
     else:
-        warn("No thick branch cylinders were generated; using trunk_cylinder collision only.")
+        warn("No thick branch cylinders were generated; falling back to trunk_cylinder.")
+        return create_trunk_collision(bpy, args)
     return collision_objects
 
 
