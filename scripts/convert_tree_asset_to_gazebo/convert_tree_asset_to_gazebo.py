@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -15,6 +16,39 @@ MODEL_SDF_TEMPLATE = '''<?xml version="1.0" ?>
         <geometry>
           <mesh>
             <uri>model://{model_name}/meshes/tree_mesh.obj</uri>
+          </mesh>
+        </geometry>
+      </visual>
+
+      <collision name="tree_collision">
+        <geometry>
+          <mesh>
+            <uri>model://{model_name}/meshes/tree_collision.stl</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>
+'''
+
+MODEL_SDF_SPLIT_VISUAL_TEMPLATE = '''<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="{model_name}">
+    <static>true</static>
+    <link name="tree_link">
+      <visual name="leaf_visual">
+        <geometry>
+          <mesh>
+            <uri>model://{model_name}/meshes/{leaf_mesh}</uri>
+          </mesh>
+        </geometry>
+      </visual>
+
+      <visual name="wood_visual">
+        <geometry>
+          <mesh>
+            <uri>model://{model_name}/meshes/{wood_mesh}</uri>
           </mesh>
         </geometry>
       </visual>
@@ -77,6 +111,41 @@ def parse_args(argv):
     parser.add_argument("--origin-empty-name", default="TREE_ORIGIN")
     parser.add_argument("--visual-collection", default="visual")
     parser.add_argument("--collision-collection", default="collision")
+    parser.add_argument(
+        "--split-visuals",
+        action="store_true",
+        help=(
+            "Export separate visual meshes for leaf_visual and wood_visual in model.sdf. "
+            "The combined tree_mesh.obj is still exported for compatibility."
+        ),
+    )
+    parser.add_argument(
+        "--leaf-collection",
+        default="leaf",
+        help="Blender collection containing leaf visual objects when --split-visuals is used.",
+    )
+    parser.add_argument(
+        "--wood-collection",
+        default="wood",
+        help="Blender collection containing trunk/branch visual objects when --split-visuals is used.",
+    )
+    parser.add_argument("--leaf-output-name", default="tree_leaf.obj")
+    parser.add_argument("--wood-output-name", default="tree_wood.obj")
+    parser.add_argument(
+        "--split-unknown-as",
+        choices=("wood", "leaf", "ignore"),
+        default="wood",
+        help=(
+            "How to treat visual objects that cannot be classified by name when semantic "
+            "collections are not available."
+        ),
+    )
+    parser.add_argument(
+        "--write-semantic-parts",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write semantic_parts.json next to model.sdf when --split-visuals succeeds.",
+    )
     parser.add_argument("--scale", type=float, default=1.0)
     parser.add_argument("--trunk-radius", type=float, default=0.18)
     parser.add_argument("--trunk-height", type=float, default=1.2)
@@ -379,6 +448,122 @@ def branch_name_kind(obj):
     if any(token in name for token in BRANCH_INCLUDE_TOKENS):
         return "included"
     return "unknown"
+
+
+def semantic_visual_kind(obj):
+    """Classify a visual object into leaf / wood / unknown from its name.
+
+    This is only a fallback. Prefer explicit Blender collections named by
+    --leaf-collection and --wood-collection for reliable semantic labels.
+    """
+    kind = branch_name_kind(obj)
+    if kind == "excluded":
+        return "leaf"
+    if kind == "included":
+        return "wood"
+    return "unknown"
+
+
+def collection_export_candidates(bpy, collection_name, visual_name_set):
+    collection = collection_objects(bpy, collection_name)
+    if collection is None:
+        return None
+    return [
+        obj
+        for obj in collection.all_objects
+        if obj.name in visual_name_set and obj.type == "MESH"
+    ]
+
+
+def find_split_visual_groups(bpy, args, visual_objects):
+    """Return (leaf_objects, wood_objects, source_description).
+
+    Collection-based grouping is preferred. If either semantic collection is
+    missing or empty, object-name fallback is used.
+    """
+    visual_name_set = object_set(visual_objects)
+
+    leaf_from_collection = collection_export_candidates(
+        bpy, args.leaf_collection, visual_name_set
+    )
+    wood_from_collection = collection_export_candidates(
+        bpy, args.wood_collection, visual_name_set
+    )
+
+    if leaf_from_collection and wood_from_collection:
+        return (
+            unique_objects(leaf_from_collection),
+            unique_objects(wood_from_collection),
+            f"collections:{args.leaf_collection},{args.wood_collection}",
+        )
+
+    if leaf_from_collection is not None or wood_from_collection is not None:
+        warn(
+            "Semantic visual collections were partially available but incomplete. "
+            "Falling back to object-name classification."
+        )
+
+    leaf_objects = []
+    wood_objects = []
+    ignored_unknown = []
+    for obj in visual_objects:
+        kind = semantic_visual_kind(obj)
+        if kind == "leaf":
+            leaf_objects.append(obj)
+        elif kind == "wood":
+            wood_objects.append(obj)
+        elif args.split_unknown_as == "leaf":
+            leaf_objects.append(obj)
+        elif args.split_unknown_as == "wood":
+            wood_objects.append(obj)
+        else:
+            ignored_unknown.append(obj)
+
+    if ignored_unknown:
+        warn(
+            "Ignoring unclassified visual objects for split visual export: "
+            + ", ".join(obj.name for obj in ignored_unknown)
+        )
+
+    return (
+        unique_objects(leaf_objects),
+        unique_objects(wood_objects),
+        f"name_tokens:unknown_as_{args.split_unknown_as}",
+    )
+
+
+def write_semantic_parts(output_dir, model_name, leaf_mesh, wood_mesh, split_source):
+    data = {
+        "model": model_name,
+        "visual_mode": "split_leaf_wood",
+        "split_source": split_source,
+        "parts": [
+            {
+                "name": "leaf_visual",
+                "class": "leaf",
+                "contact_policy": "ALLOW_CONTACT",
+                "mesh": f"meshes/{leaf_mesh}",
+                "gazebo_visual": "tree_link::leaf_visual",
+            },
+            {
+                "name": "wood_visual",
+                "class": "wood",
+                "contact_policy": "AVOID",
+                "mesh": f"meshes/{wood_mesh}",
+                "gazebo_visual": "tree_link::wood_visual",
+            },
+            {
+                "name": "tree_collision",
+                "class": "collision_wood",
+                "contact_policy": "AVOID",
+                "mesh": "meshes/tree_collision.stl",
+                "gazebo_collision": "tree_link::tree_collision",
+            },
+        ],
+    }
+    path = output_dir / "semantic_parts.json"
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 def curve_radius_scale(obj):
@@ -740,10 +925,22 @@ def make_generated_collision(bpy, mathutils, args, visual_bounds, visual_objects
     raise RuntimeError(f"Unsupported collision mode: {args.collision_mode}")
 
 
-def write_gazebo_files(output_dir, model_name):
-    (output_dir / "model.sdf").write_text(
-        MODEL_SDF_TEMPLATE.format(model_name=model_name), encoding="utf-8"
-    )
+def write_gazebo_files(
+    output_dir,
+    model_name,
+    split_visuals=False,
+    leaf_mesh="tree_leaf.obj",
+    wood_mesh="tree_wood.obj",
+):
+    if split_visuals:
+        sdf_text = MODEL_SDF_SPLIT_VISUAL_TEMPLATE.format(
+            model_name=model_name,
+            leaf_mesh=leaf_mesh,
+            wood_mesh=wood_mesh,
+        )
+    else:
+        sdf_text = MODEL_SDF_TEMPLATE.format(model_name=model_name)
+    (output_dir / "model.sdf").write_text(sdf_text, encoding="utf-8")
     (output_dir / "model.config").write_text(
         MODEL_CONFIG_TEMPLATE.format(model_name=model_name), encoding="utf-8"
     )
@@ -832,6 +1029,24 @@ def convert(args):
     branch_segments = transform_branch_segments(branch_segments_raw, args.scale, origin_vector)
     log_visual_bounds(visual_bounds)
 
+    split_visual_groups = None
+    if args.split_visuals:
+        leaf_objects, wood_objects, split_source = find_split_visual_groups(
+            bpy, args, visual_objects
+        )
+        if not leaf_objects or not wood_objects:
+            warn(
+                "--split-visuals was requested, but leaf and wood visual groups could "
+                "not both be resolved. Falling back to single tree_visual in model.sdf."
+            )
+        else:
+            split_visual_groups = (leaf_objects, wood_objects, split_source)
+            info(
+                "Split visual groups resolved: "
+                f"leaf={len(leaf_objects)} objects, wood={len(wood_objects)} objects "
+                f"({split_source})"
+            )
+
     if use_collision_file:
         collision_source = f"file:{collision_file_path}"
     elif use_collision_collection:
@@ -860,6 +1075,20 @@ def convert(args):
 
     export_obj_compatible(bpy, visual_objects, meshes_dir / "tree_mesh.obj")
 
+    semantic_parts_path = None
+    if split_visual_groups is not None:
+        leaf_objects, wood_objects, split_source = split_visual_groups
+        export_obj_compatible(bpy, leaf_objects, meshes_dir / args.leaf_output_name)
+        export_obj_compatible(bpy, wood_objects, meshes_dir / args.wood_output_name)
+        if args.write_semantic_parts:
+            semantic_parts_path = write_semantic_parts(
+                output_dir,
+                args.model_name,
+                args.leaf_output_name,
+                args.wood_output_name,
+                split_source,
+            )
+
     collision_output_path = meshes_dir / "tree_collision.stl"
     if use_collision_file:
         shutil.copy2(collision_file_path, collision_output_path)
@@ -872,7 +1101,13 @@ def convert(args):
             bpy, mathutils, args, visual_bounds, visual_objects, branch_segments
         )
         export_stl(bpy, collision_objects, collision_output_path)
-    write_gazebo_files(output_dir, args.model_name)
+    write_gazebo_files(
+        output_dir,
+        args.model_name,
+        split_visuals=split_visual_groups is not None,
+        leaf_mesh=args.leaf_output_name,
+        wood_mesh=args.wood_output_name,
+    )
 
     print_summary(
         args,
@@ -886,7 +1121,12 @@ def convert(args):
     info(f"Wrote: {output_dir / 'model.config'}")
     info(f"Wrote: {output_dir / 'model.sdf'}")
     info(f"Wrote: {meshes_dir / 'tree_mesh.obj'}")
+    if split_visual_groups is not None:
+        info(f"Wrote: {meshes_dir / args.leaf_output_name}")
+        info(f"Wrote: {meshes_dir / args.wood_output_name}")
     info(f"Wrote: {meshes_dir / 'tree_collision.stl'}")
+    if semantic_parts_path is not None:
+        info(f"Wrote: {semantic_parts_path}")
 
 
 def main():
