@@ -75,3 +75,6 @@ tree_generator:
   random_seed: 0
   scale_min: 0.9
   scale_max: 1.1
+  export_semantic_instances: true
+  semantic_instances_file: semantic_instances.json
+  semantic_frame_id: orange_agv1/map

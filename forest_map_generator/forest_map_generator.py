@@ -6,7 +6,7 @@ import cv2
 import math
 import rclpy
 import random
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Optional
 
 import numpy as np
@@ -75,6 +75,93 @@ class TreeInstance:
     world_x: Optional[float] = None
     world_y: Optional[float] = None
     world_z: Optional[float] = None
+
+
+@dataclass
+class Pose6D:
+    x: float
+    y: float
+    z: float
+    roll: float = 0.0
+    pitch: float = 0.0
+    yaw: float = 0.0
+
+
+@dataclass
+class Scale3D:
+    x: float = 1.0
+    y: float = 1.0
+    z: float = 1.0
+
+
+@dataclass
+class SemanticInstance:
+    id: str
+    name: str
+    model: str
+    type: str
+    pose: Pose6D
+    scale: Scale3D
+    semantic_parts: Optional[str]
+    sdf_model_uri: str
+    semantic_available: bool = True
+
+
+def export_semantic_instances(instances, output_path, frame_id="orange_agv1/map"):
+    data = {
+        "schema_version": "0.1",
+        "frame_id": frame_id,
+        "generator": "forest_map_generator",
+        "instances": [asdict(instance) for instance in instances],
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def validate_semantic_instances_json(path):
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    for key in ("schema_version", "frame_id", "instances"):
+        if key not in data:
+            raise ValueError("semantic_instances.json missing required key: %s" % key)
+    if not isinstance(data["instances"], list):
+        raise ValueError("semantic_instances.json 'instances' must be a list")
+
+    ids = set()
+    required_instance_keys = {
+        "id",
+        "name",
+        "model",
+        "type",
+        "pose",
+        "scale",
+        "semantic_parts",
+        "sdf_model_uri",
+    }
+    for index, instance in enumerate(data["instances"]):
+        missing = required_instance_keys - set(instance.keys())
+        if missing:
+            raise ValueError(
+                "semantic instance %d missing required keys: %s"
+                % (index, ", ".join(sorted(missing)))
+            )
+        if instance["id"] in ids:
+            raise ValueError("duplicate semantic instance id: %s" % instance["id"])
+        ids.add(instance["id"])
+        pose = instance["pose"]
+        scale = instance["scale"]
+        for key in ("x", "y", "z", "roll", "pitch", "yaw"):
+            if not isinstance(pose.get(key), (int, float)):
+                raise ValueError("semantic instance %s pose.%s must be numeric" % (instance["id"], key))
+        for key in ("x", "y", "z"):
+            if not isinstance(scale.get(key), (int, float)):
+                raise ValueError("semantic instance %s scale.%s must be numeric" % (instance["id"], key))
+        if instance["semantic_parts"] is not None and not isinstance(instance["semantic_parts"], str):
+            raise ValueError("semantic instance %s semantic_parts must be a string or null" % instance["id"])
+        if not isinstance(instance["semantic_available"], bool):
+            raise ValueError("semantic instance %s semantic_available must be a boolean" % instance["id"])
 
 
 # Terrain helper class
@@ -216,6 +303,7 @@ class TreeGenerator(TerrainHelper):
         self.orchard_jitter_xy = node.orchard_jitter_xy
         self.scale_min = node.scale_min
         self.scale_max = node.scale_max
+        self.model_dirs = self._resolve_model_dirs(node.model_dirs)
 
     def _has_tree_types(self):
         if self.tree_types:
@@ -244,6 +332,61 @@ class TreeGenerator(TerrainHelper):
                 return False
 
         return True
+
+    def _resolve_model_dirs(self, model_dirs):
+        if isinstance(model_dirs, str):
+            model_dirs = [model_dirs]
+        if not model_dirs:
+            model_dirs = ["models"]
+
+        resolved = []
+        for model_dir in model_dirs:
+            if os.path.isabs(model_dir):
+                path = os.path.abspath(model_dir)
+            else:
+                path = os.path.abspath(os.path.join(self.package_path, model_dir))
+            if path not in resolved:
+                resolved.append(path)
+        return resolved
+
+    def semantic_parts_uri_for_model(self, tree_type):
+        for model_dir in self.model_dirs:
+            semantic_path = os.path.join(model_dir, tree_type, "semantic_parts.json")
+            if os.path.exists(semantic_path):
+                return f"model://{tree_type}/semantic_parts.json", True
+        return None, False
+
+    def create_semantic_instance(
+        self,
+        instance_id,
+        tree_name,
+        tree_type,
+        world_x,
+        world_y,
+        world_z,
+        yaw,
+        scale,
+    ):
+        semantic_parts, semantic_available = self.semantic_parts_uri_for_model(tree_type)
+        scale_value = float(scale) if scale is not None else 1.0
+        return SemanticInstance(
+            id=instance_id,
+            name=tree_name,
+            model=tree_type,
+            type="tree",
+            pose=Pose6D(
+                x=float(world_x),
+                y=float(world_y),
+                z=float(world_z),
+                roll=0.0,
+                pitch=0.0,
+                yaw=float(yaw),
+            ),
+            scale=Scale3D(x=scale_value, y=scale_value, z=scale_value),
+            semantic_parts=semantic_parts,
+            sdf_model_uri=f"model://{tree_type}",
+            semantic_available=semantic_available,
+        )
 
     def create_tree_include_xml(
         self,
@@ -1084,6 +1227,7 @@ class TreeGenerator(TerrainHelper):
 
     def generate_trees_xml(self, trees):
         trees_xml = "\n    <!-- Auto-generated trees -->\n"
+        semantic_instances = []
         for i, tree in enumerate(trees):
             pixel_world_x, pixel_world_y, pixel_world_z = self.pixel_to_world(
                 tree.px, tree.py
@@ -1103,19 +1247,40 @@ class TreeGenerator(TerrainHelper):
                 value is not None
                 for value in (tree.world_x, tree.world_y, tree.world_z)
             )
+            instance_id = f"tree_{i + 1:06d}"
+            tree_name = tree.name if tree.name else instance_id
+            yaw = tree.yaw if tree.yaw is not None else random.uniform(0, 2 * math.pi)
+            if tree.scale is not None:
+                scale = tree.scale
+            else:
+                scale_low = min(self.scale_min, self.scale_max)
+                scale_high = max(self.scale_min, self.scale_max)
+                scale = random.uniform(scale_low, scale_high)
             trees_xml += self.create_tree_include_xml(
                 tree.tree_type,
                 world_x,
                 world_y,
                 world_z,
                 i,
-                yaw=tree.yaw,
-                scale=tree.scale,
-                name=tree.name,
+                yaw=yaw,
+                scale=scale,
+                name=tree_name,
                 force_scale=force_scale,
             )
+            semantic_instances.append(
+                self.create_semantic_instance(
+                    instance_id,
+                    tree_name,
+                    tree.tree_type,
+                    world_x,
+                    world_y,
+                    world_z,
+                    yaw,
+                    scale,
+                )
+            )
         trees_xml += "    <!-- End auto-generated trees -->\n"
-        return trees_xml
+        return trees_xml, semantic_instances
 
 
 # Road generation class
@@ -1383,6 +1548,10 @@ class ForestMapGenerator(Node):
         self.declare_parameter("random_seed", 0)
         self.declare_parameter("scale_min", 1.0)
         self.declare_parameter("scale_max", 1.0)
+        self.declare_parameter("model_dirs", ["models"])
+        self.declare_parameter("export_semantic_instances", True)
+        self.declare_parameter("semantic_instances_file", "semantic_instances.json")
+        self.declare_parameter("semantic_frame_id", "orange_agv1/map")
 
         self.terrain_dir = self.get_parameter("terrain_dir").value
         self.heightmap_file = self.get_parameter("heightmap_file").value
@@ -1417,6 +1586,10 @@ class ForestMapGenerator(Node):
         self.random_seed = self.get_parameter("random_seed").value
         self.scale_min = self.get_parameter("scale_min").value
         self.scale_max = self.get_parameter("scale_max").value
+        self.model_dirs = self.get_parameter("model_dirs").value
+        self.export_semantic_instances = self.get_parameter("export_semantic_instances").value
+        self.semantic_instances_file = self.get_parameter("semantic_instances_file").value
+        self.semantic_frame_id = self.get_parameter("semantic_frame_id").value
 
         self.get_logger().info(f"terrain_dir: {self.terrain_dir}")
         self.get_logger().info(
@@ -1486,6 +1659,40 @@ class ForestMapGenerator(Node):
             self.get_logger().error(f"Failed to write world file: {e}")
             return False
 
+    def semantic_instances_output_path(self):
+        semantic_file = str(self.semantic_instances_file)
+        if os.path.isabs(semantic_file):
+            return semantic_file
+
+        world_output_path = os.path.join(
+            self.package_path,
+            "worlds",
+            str(self.output_world_file),
+        )
+        return os.path.join(os.path.dirname(world_output_path), semantic_file)
+
+    def write_semantic_instances_file(self, semantic_instances):
+        if not self.export_semantic_instances:
+            self.get_logger().info("Semantic instance export disabled.")
+            return True
+
+        output_path = self.semantic_instances_output_path()
+        try:
+            export_semantic_instances(
+                semantic_instances,
+                output_path,
+                frame_id=str(self.semantic_frame_id),
+            )
+            validate_semantic_instances_json(output_path)
+            self.get_logger().info(
+                "Semantic instances saved to: %s (%d instances)"
+                % (output_path, len(semantic_instances))
+            )
+            return True
+        except Exception as e:
+            self.get_logger().error(f"Failed to write semantic instances file: {e}")
+            return False
+
     def run_generation(self):
         placement_mode = str(self.placement_mode).strip().lower()
         self.get_logger().info(f"Placement mode: {placement_mode}")
@@ -1527,7 +1734,10 @@ class ForestMapGenerator(Node):
             return
 
         self.get_logger().info(f"Generated tree count: {len(trees)}")
-        trees_xml = self.tree_generator.generate_trees_xml(trees) if trees else ""
+        if trees:
+            trees_xml, semantic_instances = self.tree_generator.generate_trees_xml(trees)
+        else:
+            trees_xml, semantic_instances = "", []
 
         if self.enable_road_generation:
             self.get_logger().info("Road generation enabled")
@@ -1538,10 +1748,14 @@ class ForestMapGenerator(Node):
             roads_xml = ""
 
         if self.generate_final_world_file(trees_xml, roads_xml):
-            self.get_logger().info("Generation completed successfully!")
-            self.get_logger().info(
-                f"Launch command: ros2 launch forest_map_generator gazebo.launch.py"
-            )
+            semantic_ok = self.write_semantic_instances_file(semantic_instances)
+            if semantic_ok:
+                self.get_logger().info("Generation completed successfully!")
+                self.get_logger().info(
+                    f"Launch command: ros2 launch forest_map_generator gazebo.launch.py"
+                )
+            else:
+                self.get_logger().error("Generation completed with semantic export failure.")
         else:
             self.get_logger().error("Generation failed!")
 

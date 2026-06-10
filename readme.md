@@ -167,6 +167,22 @@ Important sections:
 - `tree_generator.terrain_dir`: terrain model directory under `models/`; the generated world uses `model://<terrain_dir>`.
 - `gazebo`: world/model directories and Gazebo verbosity/run options. `gazebo.model_dirs` is a list of parent model directories, normally `models` and optional private directories such as `models_private`.
 
+
+### Semantic instance export
+
+When generating a forest world, `forest_map_generator` also writes `semantic_instances.json` by default into the generated world directory (`worlds/`). The file records each placed tree instance and references the model-level `semantic_parts.json` instead of copying semantic part definitions into the world-level file.
+
+Each instance contains `id`, `name`, `model`, `type`, `pose`, `scale`, `semantic_parts`, `sdf_model_uri`, and `semantic_available`. IDs are deterministic in placement order (`tree_000001`, `tree_000002`, ...). If a model does not contain `semantic_parts.json`, generation continues with `semantic_parts: null` and `semantic_available: false`.
+
+```yaml
+tree_generator:
+  export_semantic_instances: true
+  semantic_instances_file: semantic_instances.json
+  semantic_frame_id: orange_agv1/map
+```
+
+The output is offline metadata for downstream semantic ground-truth tooling. It does not publish ROS topics and does not implement point cloud labeling, image segmentation, or costmap generation.
+
 ### 1. ForestMapGenerator (ROS 2 Node)
 
 **Location**
