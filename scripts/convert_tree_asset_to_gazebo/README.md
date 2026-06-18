@@ -132,3 +132,233 @@ Blender is needed only for conversion. Once the Gazebo model directory exists, t
 - DAE is not used for this workflow because Blender 5.x may not provide Collada export.
 - `--copy-textures` copies external image texture files referenced by material nodes into `meshes/textures/` when possible, but texture-heavy assets may still need manual material/path checks.
 - `--dry-run` opens the input and reports export decisions without writing files.
+
+
+## Leaf LOD for Gazebo Performance
+
+For orchard-scale Gazebo simulations, detailed leaf meshes can become expensive because many trees are placed in the world and LiDAR / camera rendering must process their visual geometry.
+This converter provides a leaf LOD workflow that replaces detailed leaf meshes with simplified crown-like proxy meshes.
+
+The recommended current setting uses `metaball` based leaf LOD. This reduces the leaf mesh face count significantly while keeping the crown shape roughly recognizable.
+
+Example:
+
+```bash
+blender --background --python scripts/convert_tree_asset_to_gazebo/convert_tree_asset_to_gazebo_leaf_lod_convex_metaball.py -- \
+  --input ~/blender_ws/tree_models/orange_tree_01.blend \
+  --model-name orange_tree_mikan_01_lod \
+  --output-dir ~/blender_ws/gazebo_converter_output/orange_tree_mikan_01_lod \
+  --split-visuals \
+  --split-unknown-as leaf \
+  --leaf-lod-mode metaball \
+  --leaf-cluster-count 6 \
+  --leaf-sample-vertices-per-object 32 \
+  --leaf-metaball-radius 0.34 \
+  --leaf-metaball-resolution 0.22 \
+  --leaf-metaball-threshold 0.38 \
+  --leaf-metaball-decimate-ratio 0.30 \
+  --leaf-metaball-point-stride 4 \
+  --leaf-metaball-max-points 1200 \
+  --leaf-metaball-max-points-per-cluster 160 \
+  --collision-mode trunk_cylinder
+```
+
+This setting is intended as a practical compromise between appearance and simulation performance.
+In one test case, the leaf mesh was reduced from approximately `25896` faces to `852` faces.
+
+### Important options
+
+* `--split-visuals`: exports leaves and wood as separate visual meshes.
+* `--split-unknown-as leaf`: treats unclassified visual objects as leaves when explicit semantic collections are not available.
+* `--leaf-lod-mode metaball`: replaces the original leaf mesh with metaball-based simplified crown geometry.
+* `--leaf-cluster-count 6`: divides the leaf point cloud into 6 crown clusters.
+* `--leaf-metaball-radius 0.34`: controls how strongly neighboring metaballs merge.
+* `--leaf-metaball-resolution 0.22`: controls the mesh resolution after metaball conversion. Larger values produce coarser geometry.
+* `--leaf-metaball-threshold 0.38`: controls the metaball surface threshold. Smaller values make blobs merge more easily.
+* `--leaf-metaball-decimate-ratio 0.30`: reduces the generated metaball mesh after conversion.
+* `--leaf-metaball-point-stride 4`: samples every Nth leaf point for metaball generation. Smaller values use more points and tend to merge more densely.
+* `--leaf-metaball-max-points 1200`: caps the total number of sampled leaf points.
+* `--leaf-metaball-max-points-per-cluster 160`: caps the number of sampled points used for each crown cluster.
+* `--collision-mode trunk_cylinder`: uses a simple trunk cylinder for collision instead of detailed leaf or branch collision.
+
+### Parameter tuning
+
+If the generated crown is too fragmented, increase merging:
+
+```bash
+--leaf-metaball-radius 0.38 \
+--leaf-metaball-threshold 0.32 \
+--leaf-metaball-point-stride 3
+```
+
+If the generated crown is too round or too blob-like, reduce merging:
+
+```bash
+--leaf-metaball-radius 0.28 \
+--leaf-metaball-threshold 0.45 \
+--leaf-cluster-count 8
+```
+
+If the crown is too smooth and should look more low-poly:
+
+```bash
+--leaf-metaball-resolution 0.24 \
+--leaf-metaball-decimate-ratio 0.22
+```
+
+If the crown is too jagged or has sharp artifacts:
+
+```bash
+--leaf-metaball-resolution 0.20 \
+--leaf-metaball-decimate-ratio 0.35
+```
+
+### Checking mesh reduction
+
+After conversion, the face counts can be checked with:
+
+```bash
+cd ~/blender_ws/gazebo_converter_output/orange_tree_mikan_01_lod/meshes
+
+echo "leaf vertices:"
+grep -c '^v ' tree_leaf.obj
+
+echo "leaf faces:"
+grep -c '^f ' tree_leaf.obj
+
+echo "wood vertices:"
+grep -c '^v ' tree_wood.obj
+
+echo "wood faces:"
+grep -c '^f ' tree_wood.obj
+
+echo "combined tree faces:"
+grep -c '^f ' tree_mesh.obj
+```
+
+The generated OBJ / MTL files should preserve a simplified material color inherited from the source leaf material. If the mesh appears gray in Blender, switch the viewport to Material Preview mode.
+
+## Middle LOD: Surface Leaves + Inner Metaball + Wood Decimation
+
+For visual-quality simulation, a pure metaball crown can be too simplified.
+As a middle LOD, the converter can keep surface leaf islands as the original leaf geometry, replace inner leaf islands with a metaball proxy, and decimate the wood visual mesh.
+
+This mode is intended for cases where the tree should still look like a leafy tree in RGB camera images, while reducing the mesh cost compared with the full visual model.
+
+Recommended middle LOD example:
+
+```bash
+blender --background --python scripts/convert_tree_asset_to_gazebo/convert_tree_asset_to_gazebo_island_surface_inner_metaball_wood_lod.py -- \
+  --input ~/blender_ws/tree_models/orange_tree_01.blend \
+  --model-name orange_tree_mikan_01_mid_hybrid_wood_lod \
+  --output-dir ~/blender_ws/gazebo_converter_output/orange_tree_mikan_01_mid_hybrid_wood_lod \
+  --split-visuals \
+  --split-unknown-as leaf \
+  --leaf-lod-mode island_surface \
+  --leaf-surface-keep-ratio 0.50 \
+  --leaf-inner-keep-ratio 0.0 \
+  --leaf-inner-proxy-mode metaball \
+  --leaf-inner-proxy-score-scale 0.92 \
+  --leaf-inner-metaball-position-scale 0.88 \
+  --leaf-inner-metaball-radius 0.28 \
+  --leaf-inner-metaball-resolution 0.28 \
+  --leaf-inner-metaball-threshold 0.42 \
+  --leaf-inner-metaball-point-stride 3 \
+  --leaf-inner-metaball-max-points 280 \
+  --leaf-inner-metaball-decimate-ratio 0.35 \
+  --wood-lod-mode decimate \
+  --wood-decimate-ratio 0.18 \
+  --collision-mode trunk_cylinder
+```
+
+In one test case, the exported mesh was reduced as follows:
+
+```text
+full:
+  leaf faces:     21580
+  wood faces:      8032
+  combined faces: 29612
+
+middle LOD:
+  leaf faces:     11031
+  wood faces:      2653
+  combined faces: 13684
+```
+
+This is approximately a `54%` reduction in combined visual faces while keeping surface leaf shapes visible.
+
+### Middle LOD concept
+
+This mode combines three simplification strategies:
+
+* `island_surface`: keeps only the outer leaf mesh islands.
+* `inner metaball`: replaces inner leaf islands with a coarse metaball volume to avoid a hollow-looking crown.
+* `wood decimate`: reduces trunk and branch visual mesh complexity.
+
+The goal is not to preserve the exact botanical structure.
+It is a practical visual proxy for orchard-scale simulation, especially when RGB camera images are still important.
+
+### Important middle LOD options
+
+* `--leaf-lod-mode island_surface`: enables island-based leaf selection.
+* `--leaf-surface-keep-ratio 0.50`: keeps the outer 50% of leaf islands based on the crown surface score.
+* `--leaf-inner-keep-ratio 0.0`: does not keep additional original inner leaf islands.
+* `--leaf-inner-proxy-mode metaball`: replaces selected inner leaf islands with a metaball proxy.
+* `--leaf-inner-proxy-score-scale 0.92`: controls how close to the surface the inner metaball source region can reach. Larger values allow metaballs closer to the surface.
+* `--leaf-inner-metaball-position-scale 0.88`: moves metaball source points toward the crown center. Smaller values hide the metaball further inside the crown.
+* `--leaf-inner-metaball-radius 0.28`: controls the radius of each inner metaball element.
+* `--leaf-inner-metaball-resolution 0.28`: controls the generated metaball mesh resolution. Larger values produce coarser, lighter meshes.
+* `--leaf-inner-metaball-threshold 0.42`: controls metaball merging. Smaller values merge blobs more strongly.
+* `--leaf-inner-metaball-point-stride 3`: samples every Nth source point for inner metaball generation.
+* `--leaf-inner-metaball-max-points 280`: caps the number of source points used for inner metaball generation.
+* `--leaf-inner-metaball-decimate-ratio 0.35`: decimates the generated inner metaball mesh.
+* `--wood-lod-mode decimate`: enables decimation for the wood visual mesh.
+* `--wood-decimate-ratio 0.18`: target decimation ratio for the wood visual mesh.
+* `--collision-mode trunk_cylinder`: keeps collision simple and independent of visual LOD.
+
+### Middle LOD tuning
+
+If the crown looks too hollow, increase the inner metaball contribution:
+
+```bash
+--leaf-inner-proxy-score-scale 0.95 \
+--leaf-inner-metaball-position-scale 0.92 \
+--leaf-inner-metaball-radius 0.30 \
+--leaf-inner-metaball-threshold 0.36
+```
+
+If the inner metaball is too visible from the outside, move it inward:
+
+```bash
+--leaf-inner-proxy-score-scale 0.85 \
+--leaf-inner-metaball-position-scale 0.82 \
+--leaf-inner-metaball-radius 0.25 \
+--leaf-inner-metaball-threshold 0.48
+```
+
+If the model should be lighter:
+
+```bash
+--leaf-surface-keep-ratio 0.45 \
+--leaf-inner-metaball-resolution 0.32 \
+--leaf-inner-metaball-max-points 220 \
+--wood-decimate-ratio 0.15
+```
+
+If the model should preserve more leaf appearance:
+
+```bash
+--leaf-surface-keep-ratio 0.60 \
+--leaf-inner-metaball-resolution 0.24 \
+--wood-decimate-ratio 0.25
+```
+
+### Notes on this method
+
+This LOD method is based on geometric surface scoring, not on an explicit botanical branch hierarchy.
+Therefore, the number and location of preserved leaves can vary depending on branch spread, crown shape, and leaf distribution.
+
+A more structure-aware LOD would keep leaves attached to outer primary or secondary branches and merge only deeper branch levels into a proxy. That approach is conceptually cleaner, but requires reliable branch-to-leaf association data. For the current workflow, `island_surface + inner metaball + wood decimate` is used as a practical compromise.
+
+For navigation and large-scale RTF tests, the lower-cost pure metaball LOD may still be preferable.
+For RGB camera checks, object detection, segmentation, or presentation visuals, this middle LOD is usually a better first choice.
