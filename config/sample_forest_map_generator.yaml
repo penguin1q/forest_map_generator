@@ -78,3 +78,13 @@ tree_generator:
   export_semantic_instances: true
   semantic_instances_file: semantic_instances.json
   semantic_frame_id: orange_agv1/map
+
+  export_navigation_assets: true
+  nav_static_map_file: nav_static_map.yaml
+  nav_static_map_image_file: nav_static_map.pgm
+  semantic_zones_file: semantic_zones.yaml
+  nav_map_resolution: 0.10
+  nav_map_margin: 5.0
+  nav_trunk_radius: 0.25
+  nav_canopy_radius: 1.0
+  nav_occupied_border: true

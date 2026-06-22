@@ -1552,6 +1552,15 @@ class ForestMapGenerator(Node):
         self.declare_parameter("export_semantic_instances", True)
         self.declare_parameter("semantic_instances_file", "semantic_instances.json")
         self.declare_parameter("semantic_frame_id", "orange_agv1/map")
+        self.declare_parameter("export_navigation_assets", True)
+        self.declare_parameter("nav_static_map_file", "nav_static_map.yaml")
+        self.declare_parameter("nav_static_map_image_file", "nav_static_map.pgm")
+        self.declare_parameter("semantic_zones_file", "semantic_zones.yaml")
+        self.declare_parameter("nav_map_resolution", 0.10)
+        self.declare_parameter("nav_map_margin", 5.0)
+        self.declare_parameter("nav_trunk_radius", 0.25)
+        self.declare_parameter("nav_canopy_radius", 1.0)
+        self.declare_parameter("nav_occupied_border", True)
 
         self.terrain_dir = self.get_parameter("terrain_dir").value
         self.heightmap_file = self.get_parameter("heightmap_file").value
@@ -1590,6 +1599,15 @@ class ForestMapGenerator(Node):
         self.export_semantic_instances = self.get_parameter("export_semantic_instances").value
         self.semantic_instances_file = self.get_parameter("semantic_instances_file").value
         self.semantic_frame_id = self.get_parameter("semantic_frame_id").value
+        self.export_navigation_assets = self.get_parameter("export_navigation_assets").value
+        self.nav_static_map_file = self.get_parameter("nav_static_map_file").value
+        self.nav_static_map_image_file = self.get_parameter("nav_static_map_image_file").value
+        self.semantic_zones_file = self.get_parameter("semantic_zones_file").value
+        self.nav_map_resolution = self.get_parameter("nav_map_resolution").value
+        self.nav_map_margin = self.get_parameter("nav_map_margin").value
+        self.nav_trunk_radius = self.get_parameter("nav_trunk_radius").value
+        self.nav_canopy_radius = self.get_parameter("nav_canopy_radius").value
+        self.nav_occupied_border = self.get_parameter("nav_occupied_border").value
 
         self.get_logger().info(f"terrain_dir: {self.terrain_dir}")
         self.get_logger().info(
@@ -1616,9 +1634,7 @@ class ForestMapGenerator(Node):
 
     def generate_final_world_file(self, trees_xml, roads_xml):
         original_world_path = os.path.join(self.package_path, "worlds", "world.world")
-        output_world_path = os.path.join(
-            self.package_path, "worlds", self.output_world_file
-        )
+        output_world_path = self.world_output_path()
 
         try:
             with open(original_world_path, "r") as f:
@@ -1651,6 +1667,7 @@ class ForestMapGenerator(Node):
             return False
 
         try:
+            os.makedirs(os.path.dirname(output_world_path), exist_ok=True)
             with open(output_world_path, "w") as f:
                 f.write(new_world_content)
             self.get_logger().info(f"World file saved to: {output_world_path}")
@@ -1659,17 +1676,202 @@ class ForestMapGenerator(Node):
             self.get_logger().error(f"Failed to write world file: {e}")
             return False
 
+    def world_output_path(self):
+        world_file = str(self.output_world_file)
+        if os.path.isabs(world_file):
+            return world_file
+
+        normalized = os.path.normpath(world_file)
+        first_part = normalized.split(os.sep, 1)[0]
+        if first_part == "worlds":
+            return os.path.join(self.package_path, normalized)
+
+        return os.path.join(self.package_path, "worlds", normalized)
+
     def semantic_instances_output_path(self):
         semantic_file = str(self.semantic_instances_file)
         if os.path.isabs(semantic_file):
             return semantic_file
 
-        world_output_path = os.path.join(
-            self.package_path,
-            "worlds",
-            str(self.output_world_file),
+        return os.path.join(os.path.dirname(self.world_output_path()), semantic_file)
+
+    def navigation_asset_output_path(self, file_value):
+        asset_file = str(file_value)
+        if os.path.isabs(asset_file):
+            return asset_file
+
+        return os.path.join(os.path.dirname(self.world_output_path()), asset_file)
+
+    def _format_yaml_float(self, value):
+        text = f"{float(value):.6f}".rstrip("0").rstrip(".")
+        if text == "-0":
+            text = "0"
+        if "." not in text and "e" not in text.lower():
+            text += ".0"
+        return text
+
+    def _yaml_string(self, value):
+        return json.dumps(str(value), ensure_ascii=False)
+
+    def _write_nav_static_map(self, semantic_instances, yaml_path, pgm_path):
+        resolution = float(self.nav_map_resolution)
+        margin = float(self.nav_map_margin)
+        trunk_radius = max(0.0, float(self.nav_trunk_radius))
+        if resolution <= 0.0:
+            raise ValueError("nav_map_resolution must be greater than 0")
+        if margin < 0.0:
+            raise ValueError("nav_map_margin must be greater than or equal to 0")
+
+        xs = [float(instance.pose.x) for instance in semantic_instances]
+        ys = [float(instance.pose.y) for instance in semantic_instances]
+        min_x = min(xs) - margin
+        max_x = max(xs) + margin
+        min_y = min(ys) - margin
+        max_y = max(ys) + margin
+        width_px = max(1, int(math.ceil((max_x - min_x) / resolution)))
+        height_px = max(1, int(math.ceil((max_y - min_y) / resolution)))
+
+        free = 255
+        occupied = 0
+        pixels = bytearray([free]) * (width_px * height_px)
+
+        def set_occupied(ix, iy):
+            if 0 <= ix < width_px and 0 <= iy < height_px:
+                image_row = height_px - 1 - iy
+                pixels[image_row * width_px + ix] = occupied
+
+        for instance in semantic_instances:
+            x = float(instance.pose.x)
+            y = float(instance.pose.y)
+            if trunk_radius <= 0.0:
+                set_occupied(
+                    int(math.floor((x - min_x) / resolution)),
+                    int(math.floor((y - min_y) / resolution)),
+                )
+                continue
+
+            min_ix = max(0, int(math.floor((x - trunk_radius - min_x) / resolution)))
+            max_ix = min(
+                width_px - 1,
+                int(math.floor((x + trunk_radius - min_x) / resolution)),
+            )
+            min_iy = max(0, int(math.floor((y - trunk_radius - min_y) / resolution)))
+            max_iy = min(
+                height_px - 1,
+                int(math.floor((y + trunk_radius - min_y) / resolution)),
+            )
+            radius_sq = trunk_radius * trunk_radius
+            for iy in range(min_iy, max_iy + 1):
+                cell_y = min_y + (iy + 0.5) * resolution
+                for ix in range(min_ix, max_ix + 1):
+                    cell_x = min_x + (ix + 0.5) * resolution
+                    if (cell_x - x) ** 2 + (cell_y - y) ** 2 <= radius_sq:
+                        set_occupied(ix, iy)
+
+        if bool(self.nav_occupied_border):
+            for ix in range(width_px):
+                set_occupied(ix, 0)
+                set_occupied(ix, height_px - 1)
+            for iy in range(height_px):
+                set_occupied(0, iy)
+                set_occupied(width_px - 1, iy)
+
+        pgm_header = f"P5\n{width_px} {height_px}\n255\n".encode("ascii")
+        with open(pgm_path, "wb") as f:
+            f.write(pgm_header)
+            f.write(pixels)
+
+        image_path = os.path.relpath(pgm_path, os.path.dirname(yaml_path))
+        origin_text = "origin: [%s, %s, 0.0]\n" % (
+            self._format_yaml_float(min_x),
+            self._format_yaml_float(min_y),
         )
-        return os.path.join(os.path.dirname(world_output_path), semantic_file)
+        map_yaml = (
+            f"image: {image_path}\n"
+            "mode: trinary\n"
+            f"resolution: {self._format_yaml_float(resolution)}\n"
+            + origin_text
+            + "negate: 0\n"
+            "occupied_thresh: 0.65\n"
+            "free_thresh: 0.25\n"
+        )
+        with open(yaml_path, "w", encoding="utf-8") as f:
+            f.write(map_yaml)
+
+    def _write_semantic_zones(self, semantic_instances, zones_path):
+        trunk_radius = float(self.nav_trunk_radius)
+        canopy_radius = float(self.nav_canopy_radius)
+        lines = [f"frame_id: {self.semantic_frame_id}", "zones:"]
+        # TODO: nav_trunk_radius and nav_canopy_radius are temporary approximations;
+        # replace them with mesh-derived extents from collision/visual meshes later.
+        for instance in semantic_instances:
+            pose = instance.pose
+            scale = instance.scale
+            trunk_radius_scaled = trunk_radius * float(scale.x)
+            canopy_radius_scaled = canopy_radius * float(scale.x)
+            trunk_z_min = float(pose.z)
+            trunk_z_max = float(pose.z) + 2.0 * float(scale.z)
+            leaf_z_min = float(pose.z) + 0.3 * float(scale.z)
+            leaf_z_max = float(pose.z) + 2.5 * float(scale.z)
+
+            zones = [
+                (
+                    f"{instance.id}_trunk",
+                    "trunk",
+                    "dangerous",
+                    trunk_radius_scaled,
+                    trunk_z_min,
+                    trunk_z_max,
+                ),
+                (
+                    f"{instance.id}_leaf",
+                    "leaf",
+                    "allowed",
+                    canopy_radius_scaled,
+                    leaf_z_min,
+                    leaf_z_max,
+                ),
+            ]
+            for zone_id, label, contact_class, radius, z_min, z_max in zones:
+                lines.extend(
+                    [
+                        f"  - id: {self._yaml_string(zone_id)}",
+                        f"    source_instance: {self._yaml_string(instance.id)}",
+                        f"    source_model: {self._yaml_string(instance.model)}",
+                        f"    label: {label}",
+                        f"    contact_class: {contact_class}",
+                        "    type: cylinder",
+                        "    center: [%s, %s]"
+                        % (
+                            self._format_yaml_float(pose.x),
+                            self._format_yaml_float(pose.y),
+                        ),
+                        f"    radius: {self._format_yaml_float(radius)}",
+                        f"    z_min: {self._format_yaml_float(z_min)}",
+                        f"    z_max: {self._format_yaml_float(z_max)}",
+                    ]
+                )
+        lines.append("")
+        with open(zones_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+    def write_navigation_assets(self, semantic_instances):
+        if not semantic_instances:
+            raise ValueError(
+                "navigation asset export requires at least one semantic instance"
+            )
+
+        yaml_path = self.navigation_asset_output_path(self.nav_static_map_file)
+        pgm_path = self.navigation_asset_output_path(self.nav_static_map_image_file)
+        zones_path = self.navigation_asset_output_path(self.semantic_zones_file)
+        for path in (yaml_path, pgm_path, zones_path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        self._write_nav_static_map(semantic_instances, yaml_path, pgm_path)
+        self._write_semantic_zones(semantic_instances, zones_path)
+        self.get_logger().info("Navigation static map saved to: %s" % yaml_path)
+        self.get_logger().info("Navigation static map image saved to: %s" % pgm_path)
+        self.get_logger().info("Semantic zones saved to: %s" % zones_path)
 
     def write_semantic_instances_file(self, semantic_instances):
         if not self.export_semantic_instances:
@@ -1749,13 +1951,29 @@ class ForestMapGenerator(Node):
 
         if self.generate_final_world_file(trees_xml, roads_xml):
             semantic_ok = self.write_semantic_instances_file(semantic_instances)
-            if semantic_ok:
+            navigation_ok = True
+            if self.export_navigation_assets:
+                try:
+                    self.write_navigation_assets(semantic_instances)
+                except Exception as e:
+                    navigation_ok = False
+                    self.get_logger().error(
+                        "Failed to write navigation assets: %s" % e
+                    )
+            else:
+                self.get_logger().info("Navigation asset export disabled.")
+
+            if semantic_ok and navigation_ok:
                 self.get_logger().info("Generation completed successfully!")
                 self.get_logger().info(
                     f"Launch command: ros2 launch forest_map_generator gazebo.launch.py"
                 )
-            else:
+            elif not semantic_ok:
                 self.get_logger().error("Generation completed with semantic export failure.")
+            else:
+                self.get_logger().error(
+                    "Generation completed with navigation asset export failure."
+                )
         else:
             self.get_logger().error("Generation failed!")
 
