@@ -248,10 +248,11 @@ This mode is intended for cases where the tree should still look like a leafy tr
 Recommended middle LOD example:
 
 ```bash
-blender --background --python scripts/convert_tree_asset_to_gazebo/convert_tree_asset_to_gazebo_island_surface_inner_metaball_wood_lod.py -- \
+blender --background \
+  --python convert_tree_asset_to_gazebo_sdf_collision.py -- \
   --input ~/blender_ws/tree_models/orange_tree_01.blend \
-  --model-name orange_tree_mikan_01_mid_hybrid_wood_lod \
-  --output-dir ~/blender_ws/gazebo_converter_output/orange_tree_mikan_01_mid_hybrid_wood_lod \
+  --model-name orange_tree_mikan_01_mid_lod \
+  --output-dir ~/humble_robotsim/src/forest_map_generator/models_private/orange_tree_mikan_01_mid_lod \
   --split-visuals \
   --split-unknown-as leaf \
   --leaf-lod-mode island_surface \
@@ -268,7 +269,8 @@ blender --background --python scripts/convert_tree_asset_to_gazebo/convert_tree_
   --leaf-inner-metaball-decimate-ratio 0.35 \
   --wood-lod-mode decimate \
   --wood-decimate-ratio 0.18 \
-  --collision-mode trunk_cylinder
+  --collision-mode trunk_cylinder \
+  --collision-output-mode sdf_primitive
 ```
 
 In one test case, the exported mesh was reduced as follows:

@@ -20,13 +20,7 @@ MODEL_SDF_TEMPLATE = """<?xml version="1.0" ?>
         <cast_shadows>false</cast_shadows>
       </visual>
 
-      <collision name="tree_collision">
-        <geometry>
-          <mesh>
-            <uri>model://{model_name}/meshes/tree_collision.stl</uri>
-          </mesh>
-        </geometry>
-      </collision>
+{collision_xml}
     </link>
   </model>
 </sdf>
@@ -45,6 +39,9 @@ MODEL_SDF_SPLIT_VISUAL_TEMPLATE = """<?xml version="1.0" ?>
           </mesh>
         </geometry>
         <cast_shadows>false</cast_shadows>
+        <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+{leaf_segmentation_label_xml}
+        </plugin>
       </visual>
 
       <visual name="wood_visual">
@@ -54,15 +51,12 @@ MODEL_SDF_SPLIT_VISUAL_TEMPLATE = """<?xml version="1.0" ?>
           </mesh>
         </geometry>
         <cast_shadows>false</cast_shadows>
+        <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+{wood_segmentation_label_xml}
+        </plugin>
       </visual>
 
-      <collision name="tree_collision">
-        <geometry>
-          <mesh>
-            <uri>model://{model_name}/meshes/tree_collision.stl</uri>
-          </mesh>
-        </geometry>
-      </collision>
+{collision_xml}
     </link>
   </model>
 </sdf>
@@ -87,6 +81,38 @@ MODEL_CONFIG_TEMPLATE = """<?xml version="1.0"?>
 
 SUPPORTED_CONVERTIBLE_TYPES = {"MESH", "CURVE", "SURFACE"}
 IGNORED_TYPES = {"CAMERA", "LIGHT"}
+
+
+# Project-internal canonical semantic label IDs.
+# These IDs are used for Gazebo SegmentationCamera labels and dataset export.
+# Do not couple them directly to YOLO / COCO model IDs; use a separate mapping
+# when importing detector outputs.
+CANONICAL_SEMANTIC_LABELS = {
+    "background": 0,
+    # vegetation / tree
+    "leaf": 1,
+    "wood": 2,
+    "fruit": 3,
+    # terrain / static objects
+    "ground": 20,
+    "rock": 21,
+    "pole": 22,
+    "fence": 23,
+    # dynamic / safety critical
+    "person": 50,
+    "vehicle": 51,
+    "animal": 52,
+    # robot / ignore
+    "robot": 90,
+    "ignore": 255,
+}
+
+# Tree collision is physical geometry, not camera-visible semantic geometry.
+# Keep this class in semantic_parts.json, but do not add it to SDF <visual> labels.
+CAMERA_SEGMENTATION_CLASS_LABELS = {
+    "leaf": CANONICAL_SEMANTIC_LABELS["leaf"],
+    "wood": CANONICAL_SEMANTIC_LABELS["wood"],
+}
 
 
 BRANCH_INCLUDE_TOKENS = (
@@ -139,6 +165,17 @@ def parse_args(argv):
     )
 
     parser.add_argument(
+        "--collision-output-mode",
+        choices=("mesh_stl", "sdf_primitive"),
+        default="mesh_stl",
+        help=(
+            "How to write generated collision geometry. "
+            "mesh_stl preserves the legacy behavior and writes meshes/tree_collision.stl. "
+            "sdf_primitive writes SDF box/cylinder collision directly when supported."
+        ),
+    )
+
+    parser.add_argument(
         "--origin-mode",
         choices=("bottom_center", "keep", "cursor", "named_empty"),
         default="bottom_center",
@@ -168,6 +205,27 @@ def parse_args(argv):
         "--write-semantic-parts",
         action=argparse.BooleanOptionalAction,
         default=True,
+    )
+    parser.add_argument(
+        "--write-segmentation-labels",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Write Gazebo SegmentationCamera <label> elements to split visual SDF. "
+            "Only visual geometry is labeled; collision geometry is never labeled."
+        ),
+    )
+    parser.add_argument(
+        "--leaf-segmentation-label",
+        type=int,
+        default=CANONICAL_SEMANTIC_LABELS["leaf"],
+        help="Gazebo SegmentationCamera label ID for leaf_visual. Default: 1.",
+    )
+    parser.add_argument(
+        "--wood-segmentation-label",
+        type=int,
+        default=CANONICAL_SEMANTIC_LABELS["wood"],
+        help="Gazebo SegmentationCamera label ID for wood_visual. Default: 2.",
     )
 
     parser.add_argument(
@@ -316,6 +374,31 @@ def parse_args(argv):
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Apply smooth shading to the generated inner metaball proxy.",
+    )
+
+    parser.add_argument(
+        "--wood-lod-mode",
+        choices=("original", "decimate", "none"),
+        default="original",
+        help="How to export wood visuals. decimate duplicates wood mesh objects and applies a Decimate modifier for visual LOD.",
+    )
+    parser.add_argument(
+        "--wood-decimate-ratio",
+        type=float,
+        default=0.50,
+        help="Decimate ratio for wood visuals when --wood-lod-mode decimate is used. 1.0 means no reduction.",
+    )
+    parser.add_argument(
+        "--wood-join-after-decimate",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Join decimated wood objects into one mesh before OBJ export. Usually unnecessary when wood is already one object.",
+    )
+    parser.add_argument(
+        "--wood-shade-smooth",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Apply smooth shading to decimated wood visual meshes.",
     )
 
     parser.add_argument("--scale", type=float, default=1.0)
@@ -703,8 +786,26 @@ def find_split_visual_groups(bpy, args, visual_objects):
 
 
 def write_semantic_parts(
-    output_dir, model_name, leaf_mesh, wood_mesh, split_source, leaf_lod_mode
+    output_dir,
+    model_name,
+    leaf_mesh,
+    wood_mesh,
+    split_source,
+    leaf_lod_mode,
+    segmentation_labels=None,
+    collision_part=None,
 ):
+    segmentation_labels = segmentation_labels or {}
+    collision_part = collision_part or {
+        "name": "tree_collision",
+        "role": "collision",
+        "class": "collision_wood",
+        "contact_policy": "AVOID",
+        "mesh": "meshes/tree_collision.stl",
+        "gazebo_collision": "tree_link::tree_collision",
+        "segmentation_label": None,
+    }
+
     data = {
         "model": model_name,
         "visual_mode": "split_leaf_wood",
@@ -717,6 +818,7 @@ def write_semantic_parts(
                 "contact_policy": "ALLOW_CONTACT",
                 "mesh": f"meshes/{leaf_mesh}",
                 "gazebo_visual": "tree_link::leaf_visual",
+                "segmentation_label": segmentation_labels.get("leaf"),
             },
             {
                 "name": "wood_visual",
@@ -724,14 +826,9 @@ def write_semantic_parts(
                 "contact_policy": "AVOID",
                 "mesh": f"meshes/{wood_mesh}",
                 "gazebo_visual": "tree_link::wood_visual",
+                "segmentation_label": segmentation_labels.get("wood"),
             },
-            {
-                "name": "tree_collision",
-                "class": "collision_wood",
-                "contact_policy": "AVOID",
-                "mesh": "meshes/tree_collision.stl",
-                "gazebo_collision": "tree_link::tree_collision",
-            },
+            collision_part,
         ],
     }
 
@@ -1971,21 +2068,270 @@ def make_leaf_export_objects(bpy, mathutils, leaf_objects, args):
     raise RuntimeError(f"Unsupported leaf_lod_mode: {args.leaf_lod_mode}")
 
 
+
+def duplicate_mesh_objects_for_lod(bpy, objects, name_prefix):
+    selected = select_only_meshes(bpy, objects)
+
+    if not selected:
+        return []
+
+    bpy.ops.object.duplicate()
+    duplicated = list(bpy.context.selected_objects)
+
+    for index, obj in enumerate(duplicated):
+        obj.name = f"{name_prefix}_{index:02d}_{obj.name}"
+        obj.data.name = obj.name + "_mesh"
+
+    return duplicated
+
+
+def mesh_face_count(objects):
+    total = 0
+    for obj in objects:
+        if obj.type == "MESH":
+            total += len(obj.data.polygons)
+    return total
+
+
+def create_wood_decimate_lod(bpy, wood_objects, args):
+    if not wood_objects:
+        return []
+
+    original_faces = mesh_face_count(wood_objects)
+    lod_objects = duplicate_mesh_objects_for_lod(bpy, wood_objects, "wood_lod")
+
+    if not lod_objects:
+        warn("No wood mesh objects were available for decimation.")
+        return []
+
+    for obj in lod_objects:
+        if obj.type != "MESH":
+            continue
+
+        try:
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+
+            modifier = obj.modifiers.new("wood_visual_decimate", "DECIMATE")
+            modifier.ratio = max(0.05, min(1.0, args.wood_decimate_ratio))
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+        except Exception as exc:
+            warn(f"Could not decimate wood object {obj.name}: {exc}")
+
+        for poly in obj.data.polygons:
+            poly.use_smooth = bool(args.wood_shade_smooth)
+
+    if args.wood_join_after_decimate and len(lod_objects) > 1:
+        joined = join_objects_to_single_mesh(bpy, lod_objects, "wood_decimated_joined")
+        if joined:
+            lod_objects = joined
+
+    decimated_faces = mesh_face_count(lod_objects)
+    ratio = (decimated_faces / original_faces) if original_faces > 0 else 0.0
+    info(
+        "Generated wood visual LOD: "
+        f"objects={len(lod_objects)}, faces {original_faces} -> {decimated_faces} "
+        f"(ratio={ratio:.3f}, requested={args.wood_decimate_ratio:.3f})."
+    )
+
+    return lod_objects
+
+
+def make_wood_export_objects(bpy, wood_objects, args):
+    if args.wood_lod_mode == "original":
+        return wood_objects
+
+    if args.wood_lod_mode == "none":
+        return []
+
+    if args.wood_lod_mode == "decimate":
+        return create_wood_decimate_lod(bpy, wood_objects, args)
+
+    raise RuntimeError(f"Unsupported wood_lod_mode: {args.wood_lod_mode}")
+
+
+def validate_segmentation_label(label, class_name):
+    if label is None:
+        return None
+
+    try:
+        value = int(label)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"Segmentation label for {class_name} must be an integer: {label!r}"
+        ) from exc
+
+    if value < 0 or value > 255:
+        raise RuntimeError(
+            f"Segmentation label for {class_name} must be in [0, 255]: {value}"
+        )
+
+    return value
+
+
+def make_segmentation_label_xml(label, indent="        "):
+    if label is None:
+        return ""
+    return f"{indent}<label>{int(label)}</label>"
+
+
+def build_tree_segmentation_labels(args):
+    if not args.write_segmentation_labels:
+        return {}
+
+    return {
+        "leaf": validate_segmentation_label(args.leaf_segmentation_label, "leaf"),
+        "wood": validate_segmentation_label(args.wood_segmentation_label, "wood"),
+    }
+
+
+
+def sdf_float(value):
+    return f"{float(value):.9g}"
+
+
+def make_mesh_collision_xml(model_name):
+    return f"""      <collision name="tree_collision">
+        <geometry>
+          <mesh>
+            <uri>model://{model_name}/meshes/tree_collision.stl</uri>
+          </mesh>
+        </geometry>
+      </collision>"""
+
+
+def make_collision_primitive_description(args, visual_bounds):
+    if args.collision_mode == "trunk_cylinder":
+        pose = [
+            float(args.trunk_center_x),
+            float(args.trunk_center_y),
+            float(args.trunk_height) * 0.5,
+            0.0,
+            0.0,
+            0.0,
+        ]
+        return {
+            "type": "cylinder",
+            "radius": float(args.trunk_radius),
+            "length": float(args.trunk_height),
+            "pose": pose,
+        }
+
+    if args.collision_mode == "bounding_box":
+        min_x, max_x, min_y, max_y, min_z, max_z = visual_bounds
+        size = [max_x - min_x, max_y - min_y, max_z - min_z]
+        pose = [
+            (min_x + max_x) * 0.5,
+            (min_y + max_y) * 0.5,
+            (min_z + max_z) * 0.5,
+            0.0,
+            0.0,
+            0.0,
+        ]
+        return {"type": "box", "size": [float(v) for v in size], "pose": [float(v) for v in pose]}
+
+    if args.collision_mode == "bounding_cylinder":
+        min_x, max_x, min_y, max_y, min_z, max_z = visual_bounds
+        center_x = (min_x + max_x) * 0.5
+        center_y = (min_y + max_y) * 0.5
+        radius = max(max_x - min_x, max_y - min_y) * 0.5
+        height = max_z - min_z
+        pose = [center_x, center_y, min_z + height * 0.5, 0.0, 0.0, 0.0]
+        return {
+            "type": "cylinder",
+            "radius": float(max(radius, 0.001)),
+            "length": float(max(height, 0.001)),
+            "pose": [float(v) for v in pose],
+        }
+
+    return None
+
+
+def make_collision_xml_from_description(desc, model_name):
+    if desc is None:
+        return make_mesh_collision_xml(model_name)
+
+    pose_text = " ".join(sdf_float(v) for v in desc.get("pose", [0, 0, 0, 0, 0, 0]))
+
+    if desc["type"] == "cylinder":
+        return f"""      <collision name="tree_collision">
+        <pose>{pose_text}</pose>
+        <geometry>
+          <cylinder>
+            <radius>{sdf_float(desc["radius"])}</radius>
+            <length>{sdf_float(desc["length"])}</length>
+          </cylinder>
+        </geometry>
+      </collision>"""
+
+    if desc["type"] == "box":
+        size_text = " ".join(sdf_float(v) for v in desc["size"])
+        return f"""      <collision name="tree_collision">
+        <pose>{pose_text}</pose>
+        <geometry>
+          <box>
+            <size>{size_text}</size>
+          </box>
+        </geometry>
+      </collision>"""
+
+    return make_mesh_collision_xml(model_name)
+
+
+def make_collision_part_metadata(desc):
+    base = {
+        "name": "tree_collision",
+        "role": "collision",
+        "class": "collision_wood",
+        "contact_policy": "AVOID",
+        "gazebo_collision": "tree_link::tree_collision",
+        "segmentation_label": None,
+    }
+
+    if desc is None:
+        base["mesh"] = "meshes/tree_collision.stl"
+    else:
+        base["geometry"] = desc
+
+    return base
+
+
+def supports_sdf_primitive_collision(args, use_collision_file=False, use_collision_collection=False):
+    if use_collision_file or use_collision_collection:
+        return False
+    return args.collision_mode in {"trunk_cylinder", "bounding_box", "bounding_cylinder"}
+
 def write_gazebo_files(
     output_dir,
     model_name,
     split_visuals=False,
     leaf_mesh="tree_leaf.obj",
     wood_mesh="tree_wood.obj",
+    segmentation_labels=None,
+    collision_xml=None,
 ):
+    segmentation_labels = segmentation_labels or {}
+    collision_xml = collision_xml or make_mesh_collision_xml(model_name)
+
     if split_visuals:
         sdf_text = MODEL_SDF_SPLIT_VISUAL_TEMPLATE.format(
             model_name=model_name,
             leaf_mesh=leaf_mesh,
             wood_mesh=wood_mesh,
+            leaf_segmentation_label_xml=make_segmentation_label_xml(
+                segmentation_labels.get("leaf")
+            ),
+            wood_segmentation_label_xml=make_segmentation_label_xml(
+                segmentation_labels.get("wood")
+            ),
+            collision_xml=collision_xml,
         )
     else:
-        sdf_text = MODEL_SDF_TEMPLATE.format(model_name=model_name)
+        sdf_text = MODEL_SDF_TEMPLATE.format(
+            model_name=model_name,
+            collision_xml=collision_xml,
+        )
 
     (output_dir / "model.sdf").write_text(sdf_text, encoding="utf-8")
     (output_dir / "model.config").write_text(
@@ -1995,7 +2341,14 @@ def write_gazebo_files(
 
 
 def print_summary(
-    args, input_path, output_dir, visual_objects, collision_source, bounds, copied
+    args,
+    input_path,
+    output_dir,
+    visual_objects,
+    collision_source,
+    bounds,
+    copied,
+    segmentation_labels=None,
 ):
     info("Conversion summary:")
     info(f"  input: {input_path}")
@@ -2004,8 +2357,21 @@ def print_summary(
     info(f"  visual_format: {args.visual_format}")
     info(f"  origin_mode: {args.origin_mode}")
     info(f"  leaf_lod_mode: {args.leaf_lod_mode}")
+    info(f"  wood_lod_mode: {args.wood_lod_mode}")
     info(f"  visual_objects: {', '.join(obj.name for obj in visual_objects)}")
     info(f"  collision_source: {collision_source}")
+    info(f"  collision_output_mode: {args.collision_output_mode}")
+    segmentation_labels = segmentation_labels or {}
+    if segmentation_labels:
+        info(
+            "  segmentation_camera_labels: "
+            + ", ".join(
+                f"{name}={label}"
+                for name, label in sorted(segmentation_labels.items())
+            )
+        )
+    else:
+        info("  segmentation_camera_labels: disabled")
     info(
         "  visual_bounds_after_origin: "
         f"x=[{bounds[0]:.3f}, {bounds[1]:.3f}], "
@@ -2022,6 +2388,10 @@ def print_summary(
 def validate_args(args):
     if args.scale <= 0.0:
         raise RuntimeError("--scale must be greater than zero")
+
+    if args.write_segmentation_labels:
+        validate_segmentation_label(args.leaf_segmentation_label, "leaf")
+        validate_segmentation_label(args.wood_segmentation_label, "wood")
 
     if args.trunk_radius <= 0.0 or args.trunk_height <= 0.0:
         raise RuntimeError(
@@ -2087,6 +2457,10 @@ def validate_args(args):
 
     if not (0.0 < args.leaf_inner_metaball_decimate_ratio <= 1.0):
         raise RuntimeError("--leaf-inner-metaball-decimate-ratio must be in (0, 1].")
+
+    if not (0.0 < args.wood_decimate_ratio <= 1.0):
+        raise RuntimeError("--wood-decimate-ratio must be in (0, 1].")
+
 
 
 def convert(args):
@@ -2190,6 +2564,7 @@ def convert(args):
         collision_source = args.collision_mode
 
     copied_textures = []
+    segmentation_labels = build_tree_segmentation_labels(args)
 
     if args.dry_run:
         print_summary(
@@ -2200,6 +2575,7 @@ def convert(args):
             collision_source,
             visual_bounds,
             copied_textures,
+            segmentation_labels,
         )
         info("Dry run only. No files were written.")
         return
@@ -2212,6 +2588,26 @@ def convert(args):
         )
 
     semantic_parts_path = None
+
+    use_sdf_primitive_collision = (
+        args.collision_output_mode == "sdf_primitive"
+        and supports_sdf_primitive_collision(args, use_collision_file, use_collision_collection)
+    )
+
+    if args.collision_output_mode == "sdf_primitive" and not use_sdf_primitive_collision:
+        warn(
+            "sdf_primitive collision output is only supported for generated "
+            "trunk_cylinder, bounding_box, and bounding_cylinder collisions. "
+            "Falling back to mesh_stl for this model."
+        )
+
+    collision_desc = (
+        make_collision_primitive_description(args, visual_bounds)
+        if use_sdf_primitive_collision
+        else None
+    )
+    collision_xml = make_collision_xml_from_description(collision_desc, args.model_name)
+    collision_part = make_collision_part_metadata(collision_desc)
 
     if split_visual_groups is not None:
         leaf_objects, wood_objects, split_source = split_visual_groups
@@ -2231,10 +2627,18 @@ def convert(args):
                 bpy, leaf_export_objects, meshes_dir / args.leaf_output_name
             )
 
-        export_obj_compatible(bpy, wood_objects, meshes_dir / args.wood_output_name)
+        wood_export_objects = make_wood_export_objects(bpy, wood_objects, args)
+        if not wood_export_objects and args.wood_lod_mode != "none":
+            warn(
+                "Wood export objects are empty. Falling back to original wood objects."
+            )
+            wood_export_objects = wood_objects
 
-        # tree_mesh.objも互換用に出す．LOD leaf + woodの合成にする．
-        combined_export_objects = list(wood_objects) + list(leaf_export_objects)
+        if wood_export_objects:
+            export_obj_compatible(bpy, wood_export_objects, meshes_dir / args.wood_output_name)
+
+        # tree_mesh.objも互換用に出す．LOD leaf + LOD woodの合成にする．
+        combined_export_objects = list(wood_export_objects) + list(leaf_export_objects)
         if combined_export_objects:
             export_obj_compatible(
                 bpy, combined_export_objects, meshes_dir / "tree_mesh.obj"
@@ -2250,6 +2654,8 @@ def convert(args):
                 args.wood_output_name,
                 split_source,
                 args.leaf_lod_mode,
+                segmentation_labels,
+                collision_part,
             )
 
     else:
@@ -2257,7 +2663,9 @@ def convert(args):
 
     collision_output_path = meshes_dir / "tree_collision.stl"
 
-    if use_collision_file:
+    if use_sdf_primitive_collision:
+        info("Using SDF primitive collision. No tree_collision.stl will be written.")
+    elif use_collision_file:
         shutil.copy2(collision_file_path, collision_output_path)
         info(f"Copied collision file: {collision_file_path} -> {collision_output_path}")
     elif use_collision_collection:
@@ -2279,6 +2687,8 @@ def convert(args):
         split_visuals=split_visual_groups is not None,
         leaf_mesh=args.leaf_output_name,
         wood_mesh=args.wood_output_name,
+        segmentation_labels=segmentation_labels,
+        collision_xml=collision_xml,
     )
 
     print_summary(
@@ -2289,6 +2699,7 @@ def convert(args):
         collision_source,
         visual_bounds,
         copied_textures,
+        segmentation_labels,
     )
 
     info(f"Wrote: {output_dir / 'model.config'}")
@@ -2299,7 +2710,10 @@ def convert(args):
         info(f"Wrote: {meshes_dir / args.leaf_output_name}")
         info(f"Wrote: {meshes_dir / args.wood_output_name}")
 
-    info(f"Wrote: {meshes_dir / 'tree_collision.stl'}")
+    if not use_sdf_primitive_collision:
+        info(f"Wrote: {meshes_dir / 'tree_collision.stl'}")
+    else:
+        info("Wrote: SDF primitive tree_collision in model.sdf")
 
     if semantic_parts_path is not None:
         info(f"Wrote: {semantic_parts_path}")
