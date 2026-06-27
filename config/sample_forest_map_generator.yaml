@@ -4,6 +4,9 @@
 #   ros2 launch forest_map_generator gazebo.launch.py config_file:=/path/to/forest_map_generator.yaml
 
 common:
+  # tree_generator writes this world first. If static_objects.enable is true and
+  # static_objects.output_world_file is omitted, the same world file is overwritten
+  # after static objects are appended.
   world_name: world_with_trees.world
 
 gazebo:
@@ -73,3 +76,28 @@ tree_generator:
   random_seed: 0
   scale_min: 0.9
   scale_max: 1.1
+
+static_objects:
+  # Appended after forest_map_generator finishes writing common.world_name.
+  enable: false
+
+  # QGIS Point FeatureCollection. Each feature uses properties such as:
+  # label, model, name, yaw, z, z_offset, scale, scale_x, scale_y, scale_z.
+  file: config/qgis_layers_mid/static_objects_preview.geojson
+
+  # local_xy: GeoJSON coordinates are [x, y] in Gazebo world meters.
+  # lonlat:   GeoJSON coordinates are [lon, lat] and terrain_config_file is used.
+  coordinate_mode: local_xy
+
+  # If omitted, tree_generator.terrain_config_file is reused.
+  terrain_config_file: ""
+
+  # If omitted, the launch file resolves this from
+  # tree_generator.terrain_dir + tree_generator.heightmap_file.
+  heightmap_file: ""
+
+  # Optional. If omitted, static objects are appended to common.world_name in-place.
+  # output_world_file: world_with_trees_static.world
+
+  # Added to terrain height or explicit per-feature z.
+  default_z_offset: 0.0
