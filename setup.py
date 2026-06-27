@@ -32,6 +32,7 @@ def collect_terrain_data_files():
                 data_files.append((share_dir + "/" + subdir, files))
     return data_files
 
+
 setup(
     name=package_name,
     version="0.0.0",
@@ -53,6 +54,10 @@ setup(
             + glob("config/*.geojson")
             + glob("config/sample_*.yaml"),
         ),
+        (
+            "share/" + package_name + "/config/qgis_layers_mid",
+            glob("config/qgis_layers_mid/*.geojson"),
+        ),
         ("share/" + package_name + "/scripts", glob("scripts/*.py")),
         (
             "share/" + package_name + "/scripts/update_heightmap",
@@ -69,6 +74,10 @@ setup(
         (
             "share/" + package_name + "/tools/generate_tree_rows_from_areas",
             glob("tools/generate_tree_rows_from_areas/*.py"),
+        ),
+        (
+            "share/" + package_name + "/tools/add_static_objects_to_world",
+            glob("tools/add_static_objects_to_world/*.py"),
         ),
         (
             "share/" + package_name + "/models/oak_tree/materials/textures",
