@@ -62,6 +62,8 @@ def _resolve_model_dirs(config_file, pkg_share, gazebo_config):
         if path not in resolved:
             resolved.append(path)
     return resolved
+
+
 def _as_bool(value, default=False):
     if value is None:
         return default
@@ -88,10 +90,21 @@ def _resolve_package_relative(package_share, value):
     return candidates[0]
 
 
-def _world_path(package_share, world_name):
-    if os.path.isabs(str(world_name)):
-        return str(world_name)
-    return os.path.join(package_share, "worlds", str(world_name))
+def _world_path(package_share, world_dir, world_name):
+    world_name = str(world_name)
+    if os.path.isabs(world_name):
+        return world_name
+
+    normalized_world = os.path.normpath(world_name)
+    first_part = normalized_world.split(os.sep, 1)[0]
+    if first_part == "worlds":
+        return os.path.join(package_share, normalized_world)
+
+    world_dir = str(world_dir or "worlds").strip() or "worlds"
+    if os.path.isabs(world_dir):
+        return os.path.join(world_dir, normalized_world)
+
+    return os.path.join(package_share, world_dir, normalized_world)
 
 
 def _heightmap_path(package_share, tree_params, static_params):
@@ -121,6 +134,7 @@ def _static_object_process(package_share, common_config, tree_params, static_par
         raise ValueError("static_objects.enable is true, but static_objects.file is empty")
 
     world_name = common_config.get("world_name", "world_with_trees.world")
+    world_dir = common_config.get("world_dir", "worlds")
     input_world_name = static_params.get("input_world_file", tree_params.get("output_world_file", world_name))
     output_world_name = static_params.get("output_world_file", input_world_name)
 
@@ -128,8 +142,8 @@ def _static_object_process(package_share, common_config, tree_params, static_par
         package_share, "tools", "add_static_objects_to_world", "main.py"
     )
     static_geojson = _resolve_package_relative(package_share, static_file)
-    input_world = _world_path(package_share, input_world_name)
-    output_world = _world_path(package_share, output_world_name)
+    input_world = _world_path(package_share, world_dir, input_world_name)
+    output_world = _world_path(package_share, world_dir, output_world_name)
 
     coordinate_mode = static_params.get(
         "coordinate_mode",
@@ -186,6 +200,8 @@ def _launch_setup(context, *args, **kwargs):
     tree_params = config.get("tree_generator", {}) or {}
     static_params = config.get("static_objects", {}) or {}
 
+    if not isinstance(common_config, dict):
+        raise ValueError("'common' section must be a mapping")
     if not isinstance(gazebo_config, dict):
         raise ValueError("'gazebo' section must be a mapping")
     if not isinstance(tree_params, dict):
@@ -195,9 +211,10 @@ def _launch_setup(context, *args, **kwargs):
 
     pkg_share = get_package_share_directory(PACKAGE_NAME)
     world_name = common_config.get("world_name", "world_with_trees.world")
+    world_dir = common_config.get("world_dir", "worlds")
     tree_params = dict(tree_params)
     tree_params.setdefault("model_dirs", _resolve_model_dirs(config_file, pkg_share, gazebo_config))
-    tree_params.setdefault("output_world_file", world_name)
+    tree_params.setdefault("output_world_file", _world_path(package_share, world_dir, world_name))
     tree_params.setdefault("geojson_coordinate_mode", "local_xy")
     tree_params.setdefault("terrain_config_file", "")
 
