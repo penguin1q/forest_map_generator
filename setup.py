@@ -48,6 +48,10 @@ setup(
             + glob("config/*.geojson")
             + glob("config/sample_*.yaml"),
         ),
+        (
+            "share/" + package_name + "/config/qgis_layers_mid",
+            glob("config/qgis_layers_mid/*.geojson"),
+        ),
         ("share/" + package_name + "/scripts", glob("scripts/*.py")),
         (
             "share/" + package_name + "/scripts/update_heightmap",
