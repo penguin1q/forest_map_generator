@@ -69,6 +69,23 @@ def _resolve_model_dirs(config_file, pkg_share, gazebo_config):
     return resolved
 
 
+def _world_path(package_share, world_dir, world_name):
+    world_name = str(world_name)
+    if os.path.isabs(world_name):
+        return world_name
+
+    normalized_world = os.path.normpath(world_name)
+    first_part = normalized_world.split(os.sep, 1)[0]
+    if first_part == "worlds":
+        return os.path.join(package_share, normalized_world)
+
+    world_dir = str(world_dir or "worlds").strip() or "worlds"
+    if os.path.isabs(world_dir):
+        return os.path.join(world_dir, normalized_world)
+
+    return os.path.join(package_share, world_dir, normalized_world)
+
+
 def _launch_setup(context, *args, **kwargs):
     config_file = LaunchConfiguration("config_file").perform(context)
     config = _load_yaml(config_file)
@@ -76,6 +93,8 @@ def _launch_setup(context, *args, **kwargs):
     common_config = config.get("common", {}) or {}
     gazebo_config = config.get("gazebo", {}) or {}
 
+    if not isinstance(common_config, dict):
+        raise ValueError("'common' section must be a mapping")
     if not isinstance(gazebo_config, dict):
         raise ValueError("'gazebo' section must be a mapping")
 
@@ -83,12 +102,12 @@ def _launch_setup(context, *args, **kwargs):
     ros_prefix = get_package_prefix("rclcpp")
 
     world_name = common_config.get("world_name", "world_with_trees.world")
-    world_dir = gazebo_config.get("world_dir", "worlds")
+    world_dir = common_config.get("world_dir", gazebo_config.get("world_dir", "worlds"))
     model_paths = _resolve_model_dirs(config_file, pkg_share, gazebo_config)
     verbose = str(gazebo_config.get("verbose", 4))
     run = bool(gazebo_config.get("run", True))
 
-    world_path = os.path.join(pkg_share, world_dir, world_name)
+    world_path = _world_path(pkg_share, world_dir, world_name)
     ros_lib_path = os.path.join(ros_prefix, "lib")
 
     new_ign_path = _append_env_paths(
