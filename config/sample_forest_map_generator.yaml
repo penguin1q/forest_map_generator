@@ -9,9 +9,17 @@ common:
   # after static objects are appended.
   world_name: world_with_trees.world
 
+  # Directory for generated and launched world files. Relative paths are resolved
+  # under the forest_map_generator package share directory. Absolute paths are also
+  # accepted. Existing explicit tree_generator.output_world_file and
+  # static_objects.output_world_file values still take priority.
+  world_dir: worlds
+
 gazebo:
   run: true
   verbose: 4
+  # Deprecated for world lookup. Prefer common.world_dir so generation and Gazebo
+  # launch use the same directory.
   world_dir: worlds
   model_dirs:
     - models
@@ -52,7 +60,7 @@ tree_generator:
   min_tree_distance: 5.0
   max_slope: 30.0
 
-  # If omitted, launch injects common.world_name into this parameter.
+  # If omitted, launch injects common.world_dir + common.world_name into this parameter.
   # output_world_file: world_with_trees.world
 
   placement_mode: random  # orchard_grid, csv_points, or geojson
@@ -111,7 +119,8 @@ static_objects:
   # tree_generator.terrain_dir + tree_generator.heightmap_file.
   heightmap_file: ""
 
-  # Optional. If omitted, static objects are appended to common.world_name in-place.
+  # Optional. If omitted, static objects are appended to the generated world in-place.
+  # Relative paths are resolved under common.world_dir unless they already start with worlds/.
   # output_world_file: world_with_trees_static.world
 
   # Added to terrain height or explicit per-feature z.
