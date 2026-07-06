@@ -74,6 +74,10 @@ setup(
             "share/" + package_name + "/tools/generate_tree_rows_from_areas",
             glob("tools/generate_tree_rows_from_areas/*.py"),
         ),
+        (
+            "share/" + package_name + "/tools/add_static_objects_to_world",
+            glob("tools/add_static_objects_to_world/*.py"),
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
