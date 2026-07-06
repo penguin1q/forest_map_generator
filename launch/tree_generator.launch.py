@@ -7,6 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
+from launch.logging import get_logger
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -125,8 +126,10 @@ def _heightmap_path(package_share, tree_params, static_params):
 
 
 def _static_object_process(package_share, common_config, tree_params, static_params):
+    logger = get_logger("tree_generator.launch")
     enabled = _as_bool(static_params.get("enable", static_params.get("enabled", False)))
     if not enabled:
+        logger.info("static_objects is disabled; set static_objects.enable: true to append static objects")
         return None
 
     static_file = static_params.get("file", static_params.get("static_objects_file", ""))
@@ -141,6 +144,12 @@ def _static_object_process(package_share, common_config, tree_params, static_par
     script_path = os.path.join(
         package_share, "tools", "add_static_objects_to_world", "main.py"
     )
+    if not os.path.exists(script_path):
+        raise FileNotFoundError(
+            "Static object tool is not installed: "
+            f"{script_path}. Rebuild and source the workspace after updating setup.py."
+        )
+
     static_geojson = _resolve_package_relative(package_share, static_file)
     input_world = _world_path(package_share, world_dir, input_world_name)
     output_world = _world_path(package_share, world_dir, output_world_name)
@@ -182,6 +191,11 @@ def _static_object_process(package_share, common_config, tree_params, static_par
     ]
     if str(coordinate_mode).strip().lower() == "lonlat":
         cmd.extend(["--terrain-config", terrain_config_path])
+
+    logger.info("static_objects is enabled; scheduling add_static_objects_to_world after tree generation")
+    logger.info(f"static_objects input world: {input_world}")
+    logger.info(f"static_objects output world: {output_world}")
+    logger.info(f"static_objects GeoJSON: {static_geojson}")
 
     return ExecuteProcess(
         cmd=cmd,
