@@ -108,21 +108,44 @@ def _world_path(package_share, world_dir, world_name):
     return os.path.join(package_share, world_dir, normalized_world)
 
 
-def _heightmap_path(package_share, tree_params, static_params):
-    explicit = static_params.get("heightmap_file", static_params.get("heightmap", ""))
-    if explicit:
-        return _resolve_package_relative(package_share, explicit)
+def _terrain_heightmap_candidates(package_share, tree_params, heightmap_file):
+    heightmap_file = str(heightmap_file or "").strip()
+    if not heightmap_file:
+        return []
+    if os.path.isabs(heightmap_file):
+        return [heightmap_file]
 
     terrain_dir = tree_params.get("terrain_dir", "terrain")
-    heightmap_file = tree_params.get("heightmap_file", "heightmap.png")
+    heightmap_basename = os.path.basename(heightmap_file)
     candidates = [
+        os.path.join(package_share, heightmap_file),
+        os.path.abspath(heightmap_file),
         os.path.join(package_share, "models", terrain_dir, "heightmaps", heightmap_file),
         os.path.join(package_share, "models", terrain_dir, "materials", "textures", heightmap_file),
     ]
+    if heightmap_basename != heightmap_file:
+        candidates.extend(
+            [
+                os.path.join(package_share, "models", terrain_dir, "heightmaps", heightmap_basename),
+                os.path.join(package_share, "models", terrain_dir, "materials", "textures", heightmap_basename),
+            ]
+        )
+
+    unique = []
+    for candidate in candidates:
+        if candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
+def _heightmap_path(package_share, tree_params, static_params):
+    explicit = static_params.get("heightmap_file", static_params.get("heightmap", ""))
+    heightmap_file = explicit or tree_params.get("heightmap_file", "heightmap.png")
+    candidates = _terrain_heightmap_candidates(package_share, tree_params, heightmap_file)
     for candidate in candidates:
         if os.path.exists(candidate):
             return candidate
-    return candidates[0]
+    return candidates[0] if candidates else ""
 
 
 def _static_object_process(package_share, common_config, tree_params, static_params):
@@ -196,6 +219,7 @@ def _static_object_process(package_share, common_config, tree_params, static_par
     logger.info(f"static_objects input world: {input_world}")
     logger.info(f"static_objects output world: {output_world}")
     logger.info(f"static_objects GeoJSON: {static_geojson}")
+    logger.info(f"static_objects heightmap: {heightmap}")
 
     return ExecuteProcess(
         cmd=cmd,
