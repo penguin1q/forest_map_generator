@@ -10,12 +10,12 @@ from pathlib import Path
 try:
     import numpy as np
     import rasterio
+    import yaml
+    from PIL import Image
+    from pyproj import CRS, Transformer
     from rasterio.enums import Resampling
     from rasterio.transform import from_bounds
     from rasterio.warp import reproject
-    from PIL import Image
-    from pyproj import CRS, Transformer
-    import yaml
 except ImportError as e:
     print(
         "Missing dependency: %s\n"
@@ -59,9 +59,7 @@ def utm_crs_for_lonlat(lon, lat):
 class LocalLonLatProjector:
     def __init__(self, center_lat, center_lon):
         self.target_crs = utm_crs_for_lonlat(center_lon, center_lat)
-        self.to_utm = Transformer.from_crs(
-            "EPSG:4326", self.target_crs, always_xy=True
-        )
+        self.to_utm = Transformer.from_crs("EPSG:4326", self.target_crs, always_xy=True)
         self.to_lonlat = Transformer.from_crs(
             self.target_crs, "EPSG:4326", always_xy=True
         )
@@ -341,8 +339,38 @@ def ensure_single(parent, tag, text):
         ET.SubElement(parent, tag).text = text
 
 
+def ensure_visual_label(visual, label_id):
+    label_plugin = None
+
+    for plugin in visual.findall("plugin"):
+        if (
+            plugin.get("name") == "ignition::gazebo::systems::Label"
+            or plugin.get("filename") == "ignition-gazebo-label-system"
+        ):
+            label_plugin = plugin
+            break
+
+    if label_plugin is None:
+        label_plugin = ET.SubElement(
+            visual,
+            "plugin",
+            {
+                "filename": "ignition-gazebo-label-system",
+                "name": "ignition::gazebo::systems::Label",
+            },
+        )
+
+    ensure_single(label_plugin, "label", str(int(label_id)))
+
+
 def update_terrain_sdf(
-    terrain_sdf, heightmap_name, width_m, height_m, height_range_m, terrain_pos_z
+    terrain_sdf,
+    heightmap_name,
+    width_m,
+    height_m,
+    height_range_m,
+    terrain_pos_z,
+    terrain_label=20,
 ):
     tree = ET.parse(terrain_sdf)
     root = tree.getroot()
@@ -358,6 +386,11 @@ def update_terrain_sdf(
         ensure_single(heightmap, "uri", uri)
         ensure_single(heightmap, "size", size_text)
         ensure_single(heightmap, "pos", pos_text)
+
+    if terrain_label is not None:
+        for visual in root.findall(".//visual"):
+            if visual.find(".//heightmap") is not None:
+                ensure_visual_label(visual, terrain_label)
 
     tree.write(terrain_sdf, encoding="utf-8", xml_declaration=True)
 
@@ -515,6 +548,8 @@ def build_parser():
         default=str(pkg_root / "models" / "terrain" / "model.sdf"),
     )
     parser.add_argument("--terrain-pos-z", type=float, default=0.0)
+    parser.add_argument("--terrain-label", type=int, default=20)
+    parser.add_argument("--disable-terrain-label", action="store_true")
     parser.add_argument("--output-qgis-markers-dir", default=None)
     parser.add_argument("--output-extent-geojson", default=None)
     parser.add_argument("--output-corners-geojson", default=None)
@@ -645,6 +680,9 @@ def main():
                 args.height_m,
                 height_range,
                 args.terrain_pos_z,
+                terrain_label=(
+                    None if args.disable_terrain_label else args.terrain_label
+                ),
             )
     except Exception as e:
         print(f"error writing outputs: {e}", file=sys.stderr)

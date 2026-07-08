@@ -1,81 +1,62 @@
 {
-  "type": "FeatureCollection",
-  "name": "static_objects_preview",
-  "crs": {
-    "type": "name",
-    "properties": {
-      "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
-    }
-  },
-  "features": [
-    {
-      "type": "Feature",
-      "properties": {
-        "enabled": 1,
-        "label": "crate",
-        "model": "crate",
-        "name": "crate_000",
-        "yaw": 0.0,
-        "z_offset": 0.0,
-        "scale": 1.0,
-        "memo": "みかん箱など．ID/semantic material は model 側で保持する．"
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [136.0000000, 34.0000000]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "enabled": 1,
-        "label": "rock",
-        "model": "rock",
-        "name": "rock_000",
-        "yaw": 1.57079632679,
-        "z_offset": 0.0,
-        "scale_x": 1.3,
-        "scale_y": 0.9,
-        "scale_z": 0.8,
-        "memo": "岩は mesh model 側で形状近似を持たせる．"
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [136.0000100, 34.0000100]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "enabled": 1,
-        "label": "pole",
-        "model": "pole",
-        "name": "pole_000",
-        "yaw": 0.0,
-        "z": 0.0,
-        "z_offset": 0.0,
-        "scale": 1.0
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [136.0000200, 34.0000200]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "enabled": 0,
-        "label": "fence",
-        "model": "fence",
-        "name": "disabled_fence_sample",
-        "yaw": 0.0,
-        "scale": 1.0,
-        "memo": "enabled=0 の例．必要になったら有効化する．"
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [136.0000300, 34.0000300]
-      }
-    }
-  ]
+"type": "FeatureCollection",
+"name": "static_objects_preview",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "name": "harvest_basket1", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062603668433269, 33.868622625427612 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket2", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062134180561827, 33.868719793510586 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket3", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061717071364512, 33.868824136141967 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket4", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062909993001057, 33.868531347560697 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket5", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062043504649353, 33.868937159086066 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket6", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062719413568544, 33.86877417924439 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket7", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062315911290341, 33.868864861000453 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket8", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.06309689205824, 33.868282624842863 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket9", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062986374122573, 33.868267035360631 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket10", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062939436003205, 33.868322661454634 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket11", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.06283617214055, 33.868348880110588 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket12", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062779419687075, 33.868318764086183 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket13", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062681276346524, 33.868388916691295 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket14", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062571185121044, 33.868369784168344 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket15", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062526807262742, 33.868429307558991 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket16", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062422689979741, 33.868453400348159 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket17", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062311745333886, 33.868434267839667 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket18", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062213601993363, 33.868505128960784 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket18_2", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062054012387421, 33.868496625629355 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket19", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061955869046869, 33.868573155581721 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket20", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061842364139977, 33.86854835421579 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket21", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061695575839366, 33.868635513269957 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket22", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061585484613886, 33.868614254972265 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket23", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061489901534401, 33.868687950381627 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket24", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061547080698034, 33.868819043019869 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket25", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061751901582625, 33.868768731814939 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket26", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061854312024934, 33.868741096070032 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket27", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061928559595628, 33.868773692075891 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket28", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062013901630877, 33.868701413959151 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket29", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062222989617226, 33.868650394075189 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket30", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062337347944464, 33.868673069582933 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket31", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.06242695708147, 33.868601499991108 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket32", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062684690027965, 33.868537016446105 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket33", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062840865952467, 33.868498042851321 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket34", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062995335036277, 33.868459069238753 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket35", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.06314895069977, 33.86847182424119 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket36", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.063033738952157, 33.868703539786992 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket37", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062510592276055, 33.868822586061341 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket38", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062653966895283, 33.868759519900955 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket39", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062391966847031, 33.868820460236471 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket40", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062200800688089, 33.86889911572149 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket41", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062087295781168, 33.868892738252427 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket42", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061872233852341, 33.868939506347793 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket43", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061733126334872, 33.869011784262945 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket44", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061611940644838, 33.86900186376841 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket45", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062782833368487, 33.868184836225403 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket46", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062522540160955, 33.86824790281036 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket47", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061942214321249, 33.8683782875124 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket48", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061579510671436, 33.868463320906436 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket49", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.06177750419323, 33.869071307205949 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket50", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062482429404383, 33.868527095896383 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket51", "model": "harvest_basket_04", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061639250096107, 33.868529930339278 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket52", "model": "harvest_basket_01", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.062820383863993, 33.868631970220697 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket53", "model": "harvest_basket_02", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.06305251419991, 33.868760937118566 ] } },
+{ "type": "Feature", "properties": { "name": "harvest_basket54", "model": "harvest_basket_03", "label": "basket", "yaw": 0.0, "scale": 1.0, "z_offset": 0.0 }, "geometry": { "type": "Point", "coordinates": [ 136.061620474848354, 33.86872267223513 ] } }
+]
 }
