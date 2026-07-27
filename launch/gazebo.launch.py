@@ -2,7 +2,7 @@
 import os
 
 import yaml
-from ament_index_python.packages import get_package_prefix, get_package_share_directory
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
@@ -99,7 +99,6 @@ def _launch_setup(context, *args, **kwargs):
         raise ValueError("'gazebo' section must be a mapping")
 
     pkg_share = get_package_share_directory(PACKAGE_NAME)
-    ros_prefix = get_package_prefix("rclcpp")
 
     world_name = common_config.get("world_name", "world_with_trees.world")
     world_dir = common_config.get("world_dir", gazebo_config.get("world_dir", "worlds"))
@@ -108,16 +107,11 @@ def _launch_setup(context, *args, **kwargs):
     run = bool(gazebo_config.get("run", True))
 
     world_path = _world_path(pkg_share, world_dir, world_name)
-    ros_lib_path = os.path.join(ros_prefix, "lib")
-
-    new_ign_path = _append_env_paths(
-        os.environ.get("IGN_GAZEBO_RESOURCE_PATH", ""), model_paths
-    )
     new_gz_path = _append_env_paths(
         os.environ.get("GZ_SIM_RESOURCE_PATH", ""), model_paths
     )
 
-    cmd = ["ign", "gazebo", "-v", verbose]
+    cmd = ["gz", "sim", "-v", verbose]
     if run:
         cmd.append("-r")
     cmd.append(world_path)
@@ -127,9 +121,7 @@ def _launch_setup(context, *args, **kwargs):
             cmd=cmd,
             output="screen",
             additional_env={
-                "IGN_GAZEBO_RESOURCE_PATH": new_ign_path,
                 "GZ_SIM_RESOURCE_PATH": new_gz_path,
-                "IGN_GAZEBO_SYSTEM_PLUGIN_PATH": ros_lib_path,
             },
         )
     ]
