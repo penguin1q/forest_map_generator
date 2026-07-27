@@ -107,8 +107,8 @@ def ensure_visual_label(visual, label_id):
     label_plugin = None
     for plugin in visual.findall("plugin"):
         if (
-            plugin.get("name") == "ignition::gazebo::systems::Label"
-            or plugin.get("filename") == "ignition-gazebo-label-system"
+            plugin.get("name") == "gz::sim::systems::Label"
+            or plugin.get("filename") == "gz-sim-label-system"
         ):
             label_plugin = plugin
             break
@@ -118,8 +118,8 @@ def ensure_visual_label(visual, label_id):
             visual,
             "plugin",
             {
-                "filename": "ignition-gazebo-label-system",
-                "name": "ignition::gazebo::systems::Label",
+                "filename": "gz-sim-label-system",
+                "name": "gz::sim::systems::Label",
             },
         )
 

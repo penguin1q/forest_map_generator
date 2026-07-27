@@ -874,8 +874,8 @@ def make_segmentation_plugin_xml(label):
     if label is None:
         return ""
     return (
-        "        <plugin filename=\"ignition-gazebo-label-system\" "
-        "name=\"ignition::gazebo::systems::Label\">\n"
+        "        <plugin filename=\"gz-sim-label-system\" "
+        "name=\"gz::sim::systems::Label\">\n"
         f"          <label>{int(label)}</label>\n"
         "        </plugin>\n"
     )

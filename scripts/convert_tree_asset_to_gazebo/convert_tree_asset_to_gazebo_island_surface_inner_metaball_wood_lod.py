@@ -45,7 +45,7 @@ MODEL_SDF_SPLIT_VISUAL_TEMPLATE = """<?xml version="1.0" ?>
           </mesh>
         </geometry>
         <cast_shadows>false</cast_shadows>
-        <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
 {leaf_segmentation_label_xml}
         </plugin>
       </visual>
@@ -57,7 +57,7 @@ MODEL_SDF_SPLIT_VISUAL_TEMPLATE = """<?xml version="1.0" ?>
           </mesh>
         </geometry>
         <cast_shadows>false</cast_shadows>
-        <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <plugin filename="gz-sim-label-system" name="gz::sim::systems::Label">
 {wood_segmentation_label_xml}
         </plugin>
       </visual>
