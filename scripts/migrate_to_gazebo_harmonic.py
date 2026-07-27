@@ -62,6 +62,8 @@ SKIP_DIRS = {
     "__pycache__",
 }
 
+SELF_PATH = Path(__file__).resolve()
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -108,6 +110,8 @@ def iter_text_files(paths):
             if candidate.suffix.lower() not in TEXT_SUFFIXES:
                 continue
             resolved = candidate.resolve()
+            if resolved == SELF_PATH:
+                continue
             if resolved in yielded:
                 continue
             yielded.add(resolved)
