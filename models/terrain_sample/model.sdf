@@ -1,52 +1,68 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <sdf version="1.6">
   <model name="fortress_heightmap">
     <static>true</static>
+
     <link name="link">
       <visual name="visual">
         <geometry>
           <heightmap>
+            <uri>model://terrain/materials/textures/orchard_heightmap.png</uri>
+            <size>257.0 257.0 14.215492248535156</size>
+            <pos>0.0 0.0 0.0</pos>
+
             <use_terrain_paging>false</use_terrain_paging>
-            <sampling>1 1</sampling>
+            <sampling>1</sampling>
+
             <texture>
-              <diffuse>materials/textures/dirt_diffusespecular.png</diffuse>
-              <normal>materials/textures/flat_normal.png</normal>
+              <diffuse>model://terrain/materials/textures/dirt_diffusespecular.png</diffuse>
+              <normal>model://terrain/materials/textures/flat_normal.png</normal>
               <size>10</size>
             </texture>
+
             <texture>
-              <diffuse>materials/textures/grass_diffusespecular.png</diffuse>
-              <normal>materials/textures/flat_normal.png</normal>
+              <diffuse>model://terrain/materials/textures/grass_diffusespecular.png</diffuse>
+              <normal>model://terrain/materials/textures/flat_normal.png</normal>
               <size>10</size>
             </texture>
+
             <texture>
-              <diffuse>materials/textures/fungus_diffusespecular.png</diffuse>
-              <normal>materials/textures/flat_normal.png</normal>
+              <diffuse>model://terrain/materials/textures/fungus_diffusespecular.png</diffuse>
+              <normal>model://terrain/materials/textures/flat_normal.png</normal>
               <size>10</size>
             </texture>
+
             <blend>
               <min_height>1.0</min_height>
               <fade_dist>3.0</fade_dist>
             </blend>
+
             <blend>
               <min_height>10.0</min_height>
               <fade_dist>3.0</fade_dist>
             </blend>
-            <uri>model://terrain/materials/textures/heightmap.png</uri>
-            <size>257 257 50.0</size>
-            <pos>0.0 0.0 0.0</pos>
           </heightmap>
         </geometry>
+
+        <plugin
+          filename="gz-sim-label-system"
+          name="gz::sim::systems::Label">
+          <label>20</label>
+        </plugin>
       </visual>
+
       <collision name="collision">
         <geometry>
           <heightmap>
-            <use_terrain_paging>false</use_terrain_paging>
-            <sampling>1 1</sampling>
-            <uri>model://terrain/materials/textures/heightmap.png</uri>
-            <size>257 257 50.0</size>
+            <uri>model://terrain/materials/textures/orchard_heightmap.png</uri>
+            <size>257.0 257.0 14.215492248535156</size>
             <pos>0.0 0.0 0.0</pos>
-          <blend><min_height>1.0</min_height><fade_dist>3.0</fade_dist></blend><blend><min_height>10.0</min_height><fade_dist>3.0</fade_dist></blend></heightmap>
+
+            <use_terrain_paging>false</use_terrain_paging>
+            <sampling>1</sampling>
+          </heightmap>
         </geometry>
+
         <surface>
           <friction>
             <ode>
@@ -54,6 +70,7 @@
               <mu2>0.8</mu2>
             </ode>
           </friction>
+
           <contact>
             <ode>
               <kp>1e6</kp>
